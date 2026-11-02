@@ -1,0 +1,31 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0d1233;
+  color: white;
+  font-family: system-ui, sans-serif;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* keyboard users can always see where the focus is */
+:focus-visible {
+  outline: 3px solid #ffd93d;
+  outline-offset: 2px;
+}
+
+/* players who ask for less motion get (almost) no animations */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

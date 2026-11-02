@@ -1,0 +1,783 @@
+import { useEffect, useRef, useState } from "react";
+import { BOARD_WIDTH } from "../game/constants.js";
+import { boardFromLayout, cellToPixel, forEachBubble } from "../game/hexGrid.js";
+import { traceShot } from "../game/collision.js";
+import { resolveShot } from "../game/shotResolver.js";
+import { findBestShot } from "../game/hint.js";
+import { makeRng } from "../game/rng.js";
+import { pickColor } from "../game/bubbleQueue.js";
+import {
+  calculateScore,
+  calculateBombScore,
+  calculateStars,
+} from "../game/scoreManager.js";
+import {
+  createEffects,
+  addPop,
+  addFall,
+  updateEffects,
+  hasActiveEffects,
+  drawEffects,
+} from "../game/effects.js";
+import { LEVELS } from "../data/levels.js";
+import {
+  sfx,
+  getAudioSettings,
+  setSoundEnabled,
+  setMusicEnabled,
+  startMusic,
+  stopMusic,
+} from "../game/audio.js";
+import {
+  drawBoard,
+  drawBubble,
+  drawTrajectory,
+  drawLauncher,
+  drawHint,
+} from "../game/renderer.js";
+
+// NOTE: the server uses the same numbers to replay games
+// (server/src/services/validateSession.js). Change them in both places.
+const CANVAS_HEIGHT = 600;
+const LAUNCHER_X = BOARD_WIDTH / 2;
+const LAUNCHER_Y = CANVAS_HEIGHT - 60;
+const SHOT_SPEED = 16; // pixels per frame
+const HINT_SHOW_MS = 3500; // how long the golden hint line stays visible
+
+// Launcher can't aim fully sideways: keep between 15 and 165 degrees
+const MIN_ANGLE = (15 * Math.PI) / 180;
+const MAX_ANGLE = Math.PI - MIN_ANGLE;
+
+// Every level gets these unless it defines its own `boosters: { bomb, rainbow }`
+const DEFAULT_BOOSTERS = { bomb: 2, rainbow: 2 };
+const HINTS_PER_LEVEL = 3;
+
+const BOOSTERS = [
+  { id: "bomb", icon: "💣", name: "Bomb", key: "1", info: "pops every bubble around where it lands" },
+  { id: "rainbow", icon: "🌈", name: "Rainbow", key: "2", info: "matches with any colour" },
+];
+
+function countBubbles(board) {
+  let n = 0;
+  forEachBubble(board, () => n++);
+  return n;
+}
+
+// Fresh game state for a level. `seed` makes the bubble queue repeatable,
+// so the server can replay exactly this game.
+function createGame(level, seed) {
+  const board = boardFromLayout(level.layout);
+  const rng = makeRng(seed);
+  return {
+    board,
+    rng,
+    angle: Math.PI / 2,
+    current: pickColor(board, rng),
+    next: pickColor(board, rng),
+    held: null, // normal bubble that is waiting while a booster is armed
+    armed: null, // null | "bomb" | "rainbow"
+    boosters: { ...DEFAULT_BOOSTERS, ...(level.boosters || {}) },
+    hints: HINTS_PER_LEVEL,
+    hint: null, // { path, cell } while a hint is on screen
+    shotLog: [], // every shot fired: { angle, color, r, c } (sent to the server)
+    status: "READY", // READY | SHOOTING | RESOLVING | WON | LOST
+    paused: false, // pause freezes shooting, animations and music
+    score: 0,
+    shots: level.shots,
+    combo: 0, // consecutive successful shots
+    bestCombo: 0,
+    effects: createEffects(),
+  };
+}
+
+// Everything the HUD needs, copied out of the game state
+function snapshot(g, outcome = null, stars = 0) {
+  return {
+    score: g.score,
+    shots: g.shots,
+    combo: g.combo,
+    bestCombo: g.bestCombo,
+    boosters: { ...g.boosters },
+    hints: g.hints,
+    armed: g.armed,
+    outcome,
+    stars,
+  };
+}
+
+const buttonStyle = {
+  padding: "10px 24px",
+  fontSize: "18px",
+  fontWeight: "bold",
+  borderRadius: "999px",
+  border: "none",
+  cursor: "pointer",
+  background: "#ffd93d",
+};
+
+const smallButtonStyle = {
+  padding: "4px 12px",
+  fontSize: "16px",
+  fontWeight: "bold",
+  borderRadius: "999px",
+  border: "none",
+  cursor: "pointer",
+  background: "#ffd93d",
+};
+
+const overlayStyle = {
+  position: "absolute",
+  inset: 0,
+  borderRadius: "16px",
+  background: "rgba(0,0,0,0.7)",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "12px",
+};
+
+const COMBO_CSS = `
+@keyframes comboPop {
+  0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
+  25%  { transform: translate(-50%, -50%) scale(1.25); opacity: 1; }
+  70%  { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+  100% { transform: translate(-50%, -80%) scale(1); opacity: 0; }
+}
+`;
+
+export default function GameCanvas({
+  level = LEVELS[0],
+  seed = 1, // from the server (POST /api/games/start)
+  saveStatus = null, // { state: "saving" | "saved" | "error", message, canRetry }
+  onFinish = null, // called when the level ends: onFinish({ outcome, shots, score })
+  onRetrySave = null, // "Try saving again" button
+  onRestart = null, // asks the page for a NEW game session
+  onNext = null, // called when player presses "Next Level"
+  onExit = null, // called when player presses "Levels"
+}) {
+  const canvasRef = useRef(null);
+  const gameRef = useRef(null);
+  const rafRef = useRef(null);
+  const hintTimerRef = useRef(null);
+  const actionsRef = useRef({}); // always holds the latest functions (for keyboard)
+
+  if (!gameRef.current) gameRef.current = createGame(level, seed);
+
+  // React state only for the HUD / overlay (canvas itself is drawn from the ref)
+  const [hud, setHud] = useState(() => snapshot(gameRef.current));
+  const [comboFlash, setComboFlash] = useState(null); // { combo, id }
+  const [paused, setPaused] = useState(false);
+  const [hintText, setHintText] = useState("");
+
+  const [soundOn, setSoundOn] = useState(getAudioSettings().sound);
+  const [musicOn, setMusicOn] = useState(getAudioSettings().music);
+
+  const saving = saveStatus?.state === "saving";
+  const nextReady = !saveStatus || saveStatus.state === "saved";
+
+  function toggleSound() {
+    const next = !soundOn;
+    setSoundEnabled(next);
+    setSoundOn(next);
+    if (next) sfx.click(); // confirmation beep when turning ON
+  }
+
+  function toggleMusic() {
+    const next = !musicOn;
+    setMusicEnabled(next); // starts or stops the music immediately
+    setMusicOn(next);
+  }
+
+  function render(flying) {
+    const g = gameRef.current;
+    const ctx = canvasRef.current.getContext("2d");
+    ctx.clearRect(0, 0, BOARD_WIDTH, CANVAS_HEIGHT);
+    drawBoard(ctx, g.board);
+    drawEffects(ctx, g.effects);
+
+    if (g.status === "READY") {
+      const { path } = traceShot(g.board, LAUNCHER_X, LAUNCHER_Y, g.angle);
+      drawTrajectory(ctx, path);
+      if (g.hint) drawHint(ctx, g.hint.path, g.hint.cell);
+    }
+    drawLauncher(ctx, LAUNCHER_X, LAUNCHER_Y, g.angle, g.current, g.next);
+    if (flying) drawBubble(ctx, flying.x, flying.y, flying.color);
+  }
+
+  useEffect(() => {
+    render();
+
+    // Browsers only allow audio after a click, so start music on first click too
+    startMusic();
+    const kick = () => {
+      if (!gameRef.current.paused) startMusic();
+    };
+    window.addEventListener("pointerdown", kick, { once: true });
+
+    // Keyboard: Esc = pause, R = restart, Space = shoot, 1 = Bomb, 2 = Rainbow, H = hint
+    const onKey = (e) => {
+      if (e.repeat) return;
+      const a = actionsRef.current;
+      if (e.key === "Escape") {
+        a.togglePause();
+      } else if (e.key === "r" || e.key === "R") {
+        a.restart();
+      } else if (e.key === "h" || e.key === "H") {
+        a.showHint();
+      } else if (e.key === "1") {
+        a.toggleBooster("bomb");
+      } else if (e.key === "2") {
+        a.toggleBooster("rainbow");
+      } else if (e.key === " " && e.target.tagName !== "BUTTON") {
+        e.preventDefault();
+        a.shoot();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      clearTimeout(hintTimerRef.current);
+      window.removeEventListener("pointerdown", kick);
+      window.removeEventListener("keydown", onKey);
+      stopMusic();
+    };
+  }, []);
+
+  function clearHint() {
+    clearTimeout(hintTimerRef.current);
+    gameRef.current.hint = null;
+    setHintText("");
+  }
+
+  function togglePause() {
+    const g = gameRef.current;
+    if (g.status === "WON" || g.status === "LOST") return; // nothing to pause
+    g.paused = !g.paused;
+    setPaused(g.paused);
+    if (g.paused) {
+      stopMusic();
+    } else {
+      startMusic(); // only plays if Music is ON in settings
+    }
+    render();
+  }
+
+  function restart() {
+    if (saving) return; // wait until the finished game is saved
+    sfx.click();
+
+    // normal case: the page gets a NEW session (new seed) and rebuilds this game
+    if (onRestart) {
+      onRestart();
+      return;
+    }
+
+    // fallback when no page is controlling the game
+    cancelAnimationFrame(rafRef.current);
+    clearTimeout(hintTimerRef.current);
+    gameRef.current = createGame(level, seed);
+    setPaused(false);
+    setHintText("");
+    setHud(snapshot(gameRef.current));
+    setComboFlash(null);
+    startMusic();
+    render();
+  }
+
+  // Shows the best shot for the bubble currently in the launcher
+  function showHint() {
+    const g = gameRef.current;
+
+    // validation: only between shots, never when paused or after the level ended
+    if (g.status !== "READY" || g.paused) return;
+    if (g.hints <= 0) {
+      setHintText("No hints left on this level");
+      return;
+    }
+
+    const best = findBestShot(
+      g.board,
+      LAUNCHER_X,
+      LAUNCHER_Y,
+      g.current,
+      MIN_ANGLE,
+      MAX_ANGLE
+    );
+
+    sfx.click();
+
+    if (!best) {
+      // no match is possible with this bubble: nothing is spent
+      setHintText("💡 No match possible with this bubble. Try setting up a shot.");
+      return;
+    }
+
+    g.hints -= 1;
+    g.hint = { path: best.path, cell: best.cell };
+
+    let text = `💡 Hint: pops ${best.popped} bubble${best.popped === 1 ? "" : "s"}`;
+    if (best.floating > 0) text += ` and drops ${best.floating}`;
+    if (best.path.length > 2) text += " (bank shot off the wall!)";
+    text += ". Aim along the golden line.";
+    setHintText(text);
+
+    setHud(snapshot(g));
+    render();
+
+    clearTimeout(hintTimerRef.current);
+    hintTimerRef.current = setTimeout(() => {
+      clearHint();
+      if (canvasRef.current) render();
+    }, HINT_SHOW_MS);
+  }
+
+  // Arm / disarm a booster. It replaces the current bubble until you shoot.
+  function toggleBooster(type) {
+    const g = gameRef.current;
+
+    // validation: only between shots, never when paused or after the level ended
+    if (g.status !== "READY" || g.paused) return;
+    if (countBubbles(g.board) === 0) return; // nothing to hit
+
+    clearHint(); // an old hint was for a different bubble
+
+    if (g.armed === type) {
+      // tapping again cancels: the normal bubble comes back, nothing is spent
+      g.current = g.held;
+      g.held = null;
+      g.armed = null;
+    } else {
+      if (g.boosters[type] <= 0) return; // none left
+      if (g.armed) {
+        // switching from the other booster: bring the normal bubble back first
+        g.current = g.held;
+        g.held = null;
+        g.armed = null;
+      }
+      g.held = g.current;
+      g.current = type;
+      g.armed = type;
+    }
+
+    sfx.click();
+    setHud(snapshot(g));
+    render();
+  }
+
+  function updateAim(e) {
+    const g = gameRef.current;
+    if (g.status !== "READY" || g.paused) return;
+    const rect = canvasRef.current.getBoundingClientRect();
+    const mx = ((e.clientX - rect.left) * BOARD_WIDTH) / rect.width;
+    const my = ((e.clientY - rect.top) * CANVAS_HEIGHT) / rect.height;
+
+    let angle = Math.atan2(LAUNCHER_Y - my, mx - LAUNCHER_X);
+    g.angle = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, angle));
+    render();
+  }
+
+  // Runs after the bubble has attached: starts effects, then finishes the turn
+  function resolveTurn(cell, color) {
+    const g = gameRef.current;
+    const result = resolveShot(g.board, cell.r, cell.c, color);
+
+    // combo: every match in a row raises it, a miss resets it
+    if (result.matched) {
+      g.combo += 1;
+      g.bestCombo = Math.max(g.bestCombo, g.combo);
+    } else {
+      g.combo = 0;
+    }
+
+    const combo = Math.max(g.combo, 1);
+    g.score +=
+      result.special === "bomb"
+        ? calculateBombScore(result.popped.length, result.floating.length, combo)
+        : calculateScore(result.popped.length, result.floating.length, combo);
+    g.shots -= 1;
+
+    // sounds (pitch goes higher with bigger groups and higher combos)
+    if (result.special === "bomb") sfx.pop(10);
+    else if (result.matched) sfx.pop(result.popped.length + g.combo - 1);
+    else sfx.stick();
+    if (result.floating.length > 0) sfx.fall();
+
+    if (g.combo >= 2) setComboFlash({ combo: g.combo, id: Date.now() });
+
+    // start animations
+    for (const b of result.poppedBubbles) {
+      const { x, y } = cellToPixel(b.r, b.c);
+      addPop(g.effects, x, y, b.color);
+    }
+    for (const b of result.floatingBubbles) {
+      const { x, y } = cellToPixel(b.r, b.c);
+      addFall(g.effects, x, y, b.color);
+    }
+
+    // decide the result now, but show it after the animations finish
+    let outcome = null;
+    let stars = 0;
+    if (countBubbles(g.board) === 0) {
+      outcome = "WON";
+      // a win always gives at least 1 star
+      stars = Math.max(1, calculateStars(g.score, level.starThresholds));
+    } else if (g.shots <= 0) {
+      outcome = "LOST";
+    }
+
+    g.status = "RESOLVING"; // blocks shooting while animations play
+    setHud(snapshot(g));
+
+    const finish = () => {
+      g.status = outcome || "READY";
+      if (outcome === "WON") sfx.win();
+      if (outcome === "LOST") sfx.lose();
+      setHud(snapshot(g, outcome, stars));
+      render();
+      // send the shots to the server, which replays and saves the verified result
+      if (outcome && onFinish) {
+        onFinish({ outcome, shots: g.shotLog, score: g.score });
+      }
+    };
+
+    const animate = () => {
+      if (g.paused) {
+        // frozen: keep waiting, do not move any animation forward
+        rafRef.current = requestAnimationFrame(animate);
+        return;
+      }
+      updateEffects(g.effects);
+      render();
+      if (hasActiveEffects(g.effects)) {
+        rafRef.current = requestAnimationFrame(animate);
+      } else {
+        finish();
+      }
+    };
+    animate();
+  }
+
+  function shoot() {
+    const g = gameRef.current;
+    if (g.status !== "READY" || g.paused) return; // no double shooting, none while paused
+
+    const { path, cell } = traceShot(g.board, LAUNCHER_X, LAUNCHER_Y, g.angle);
+    if (!cell) return;
+
+    clearHint();
+    g.status = "SHOOTING";
+    sfx.shoot();
+    const color = g.current;
+
+    // remember this shot: the server will replay it
+    g.shotLog.push({ angle: g.angle, color, r: cell.r, c: cell.c });
+
+    if (g.armed) {
+      // booster shot: spend one booster, then the held normal bubble comes back
+      g.boosters[g.armed] -= 1;
+      g.armed = null;
+      g.current = g.held;
+      g.held = null;
+    } else {
+      g.current = g.next;
+      g.next = pickColor(g.board, g.rng);
+    }
+    setHud(snapshot(g));
+
+    let seg = 0;
+    let pos = { x: path[0].x, y: path[0].y };
+
+    const step = () => {
+      if (g.paused) {
+        // frozen mid-flight: bubble stays where it is
+        rafRef.current = requestAnimationFrame(step);
+        return;
+      }
+
+      // move SHOT_SPEED pixels along the path (it may turn at bounce points)
+      let remaining = SHOT_SPEED;
+      while (remaining > 0 && seg < path.length - 1) {
+        const target = path[seg + 1];
+        const d = Math.hypot(target.x - pos.x, target.y - pos.y);
+        if (d <= remaining) {
+          pos = { x: target.x, y: target.y };
+          remaining -= d;
+          seg++;
+        } else {
+          pos = {
+            x: pos.x + ((target.x - pos.x) * remaining) / d,
+            y: pos.y + ((target.y - pos.y) * remaining) / d,
+          };
+          remaining = 0;
+        }
+      }
+
+      if (seg >= path.length - 1) {
+        resolveTurn(cell, color);
+        return;
+      }
+
+      render({ x: pos.x, y: pos.y, color });
+      rafRef.current = requestAnimationFrame(step);
+    };
+
+    rafRef.current = requestAnimationFrame(step);
+  }
+
+  // keep the keyboard handler pointing at the newest functions
+  actionsRef.current = { togglePause, restart, shoot, toggleBooster, showHint };
+
+  const armedInfo = BOOSTERS.find((b) => b.id === hud.armed);
+  const barDisabled = paused || !!hud.outcome;
+
+  let statusLine = "Tap a booster to arm it (uses 1 booster + 1 shot)";
+  if (hintText) statusLine = hintText;
+  else if (armedInfo)
+    statusLine = `${armedInfo.icon} ${armedInfo.name} ready: ${armedInfo.info}. Shoot! (tap again to cancel)`;
+
+  return (
+    <div style={{ width: BOARD_WIDTH, maxWidth: "100%" }}>
+      <style>{COMBO_CSS}</style>
+
+      {/* HUD */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "6px",
+          fontSize: "20px",
+          fontWeight: "bold",
+          marginBottom: "8px",
+        }}
+      >
+        {onExit ? (
+          <button onClick={onExit} style={smallButtonStyle}>
+            ☰ Levels
+          </button>
+        ) : (
+          <span>Level {level.id}</span>
+        )}
+        <span>🎯 {hud.shots}</span>
+        <span>⭐ {hud.score}</span>
+        {hud.combo >= 2 && <span>🔥 x{hud.combo}</span>}
+        <span style={{ display: "flex", gap: "6px" }}>
+          <button
+            onClick={togglePause}
+            aria-label="Pause game"
+            style={{ ...smallButtonStyle, fontSize: "18px", padding: "4px 10px" }}
+          >
+            ⏸
+          </button>
+          <button
+            onClick={toggleMusic}
+            aria-label={musicOn ? "Turn music off" : "Turn music on"}
+            style={{ ...smallButtonStyle, fontSize: "18px", padding: "4px 10px" }}
+          >
+            {musicOn ? "🎵" : "🔕"}
+          </button>
+          <button
+            onClick={toggleSound}
+            aria-label={soundOn ? "Turn sound off" : "Turn sound on"}
+            style={{ ...smallButtonStyle, fontSize: "18px", padding: "4px 10px" }}
+          >
+            {soundOn ? "🔊" : "🔇"}
+          </button>
+        </span>
+      </div>
+
+      <div style={{ position: "relative" }}>
+        <canvas
+          ref={canvasRef}
+          width={BOARD_WIDTH}
+          height={CANVAS_HEIGHT}
+          onPointerMove={updateAim}
+          onPointerDown={updateAim}
+          onPointerUp={(e) => {
+            updateAim(e);
+            shoot();
+          }}
+          style={{
+            width: "100%",
+            display: "block",
+            borderRadius: "16px",
+            background: "linear-gradient(#1b2a6b, #3b1f6e)",
+            touchAction: "none",
+          }}
+        />
+
+        {/* COMBO pop-up text */}
+        {comboFlash && !hud.outcome && !paused && (
+          <div
+            key={comboFlash.id}
+            aria-live="polite"
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "40%",
+              pointerEvents: "none",
+              fontSize: "44px",
+              fontWeight: "900",
+              color: "#ffd93d",
+              textShadow: "0 3px 0 #b8501a, 0 0 18px rgba(255,150,0,0.8)",
+              whiteSpace: "nowrap",
+              animation: "comboPop 1.1s ease-out forwards",
+            }}
+          >
+            COMBO x{comboFlash.combo}!
+          </div>
+        )}
+
+        {/* PAUSED overlay */}
+        {paused && !hud.outcome && (
+          <div role="dialog" aria-label="Game paused" style={overlayStyle}>
+            <h2 style={{ fontSize: "36px", margin: 0 }}>PAUSED</h2>
+            <button onClick={togglePause} style={buttonStyle}>
+              ▶ Resume
+            </button>
+            <button onClick={restart} style={buttonStyle}>
+              ↻ Restart
+            </button>
+            {onExit && (
+              <button onClick={onExit} style={buttonStyle}>
+                ☰ Levels
+              </button>
+            )}
+            <p style={{ fontSize: "14px", margin: 0, opacity: 0.8, textAlign: "center" }}>
+              Esc = Pause · R = Restart · Space = Shoot
+              <br />1 = Bomb · 2 = Rainbow · H = Hint
+            </p>
+          </div>
+        )}
+
+        {/* Level complete / failed overlay */}
+        {hud.outcome && (
+          <div style={overlayStyle}>
+            <h2 style={{ fontSize: "32px", margin: 0 }}>
+              {hud.outcome === "WON" ? "🎉 LEVEL COMPLETE!" : "LEVEL FAILED"}
+            </h2>
+
+            {hud.outcome === "WON" && (
+              <div style={{ fontSize: "48px" }}>
+                {[1, 2, 3].map((n) => (hud.stars >= n ? "★" : "☆"))}
+              </div>
+            )}
+
+            <p style={{ fontSize: "20px", margin: 0 }}>Score: {hud.score}</p>
+            <p style={{ fontSize: "18px", margin: 0 }}>
+              🔥 Best Combo: x{Math.max(hud.bestCombo, 1)}
+            </p>
+
+            {/* saving the verified result on the server */}
+            {saving && (
+              <p role="status" style={{ margin: 0 }}>
+                Saving progress...
+              </p>
+            )}
+            {saveStatus?.state === "saved" && (
+              <p role="status" style={{ margin: 0 }}>
+                ✅ Progress saved
+              </p>
+            )}
+            {saveStatus?.state === "error" && (
+              <div role="alert" style={{ textAlign: "center", maxWidth: "90%" }}>
+                <p style={{ margin: "0 0 8px" }}>⚠️ {saveStatus.message}</p>
+                {saveStatus.canRetry && onRetrySave && (
+                  <button onClick={onRetrySave} style={smallButtonStyle}>
+                    Try saving again
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", justifyContent: "center" }}>
+              <button
+                onClick={restart}
+                disabled={saving}
+                style={{ ...buttonStyle, opacity: saving ? 0.5 : 1, cursor: saving ? "not-allowed" : "pointer" }}
+              >
+                {hud.outcome === "WON" ? "Replay" : "Retry"}
+              </button>
+              {hud.outcome === "WON" && onNext && (
+                <button
+                  onClick={onNext}
+                  disabled={!nextReady}
+                  style={{ ...buttonStyle, opacity: nextReady ? 1 : 0.5, cursor: nextReady ? "pointer" : "not-allowed" }}
+                >
+                  Next Level
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Booster + hint bar */}
+      <div
+        style={{
+          display: "flex",
+          gap: "12px",
+          justifyContent: "center",
+          flexWrap: "wrap",
+          marginTop: "12px",
+        }}
+      >
+        {BOOSTERS.map((b) => {
+          const count = hud.boosters[b.id];
+          const armed = hud.armed === b.id;
+          const disabled = barDisabled || (count <= 0 && !armed);
+          return (
+            <button
+              key={b.id}
+              onClick={() => toggleBooster(b.id)}
+              disabled={disabled}
+              aria-pressed={armed}
+              aria-label={`${b.name} booster, ${count} left. Key ${b.key}`}
+              style={{
+                ...buttonStyle,
+                minWidth: "96px",
+                padding: "12px 18px",
+                background: armed ? "#ff7a3d" : "#ffd93d",
+                outline: armed ? "3px solid white" : "none",
+                opacity: disabled ? 0.45 : 1,
+                cursor: disabled ? "not-allowed" : "pointer",
+              }}
+            >
+              {b.icon} {count}
+            </button>
+          );
+        })}
+
+        <button
+          onClick={showHint}
+          disabled={barDisabled || hud.hints <= 0}
+          aria-label={`Hint, ${hud.hints} left. Key H`}
+          style={{
+            ...buttonStyle,
+            minWidth: "96px",
+            padding: "12px 18px",
+            opacity: barDisabled || hud.hints <= 0 ? 0.45 : 1,
+            cursor: barDisabled || hud.hints <= 0 ? "not-allowed" : "pointer",
+          }}
+        >
+          💡 {hud.hints}
+        </button>
+      </div>
+
+      <p
+        aria-live="polite"
+        style={{
+          textAlign: "center",
+          minHeight: "22px",
+          margin: "8px 0 0",
+          fontSize: "15px",
+        }}
+      >
+        {statusLine}
+      </p>
+    </div>
+  );
+}
