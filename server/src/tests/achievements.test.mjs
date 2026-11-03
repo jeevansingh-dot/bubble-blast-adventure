@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { checkNewAchievements, listForUser, ACHIEVEMENTS } from "../src/services/achievements.js";
-
+c
 const newUser = () => ({
   completedLevels: [], achievements: [], totalStars: 0, totalScore: 0,
   bubblesPopped: 0, bestCombo: 0, boostersUsedTotal: 0,

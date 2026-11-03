@@ -7,6 +7,7 @@ import RegisterPage from "./pages/RegisterPage.jsx";
 import LevelsPage from "./pages/LevelsPage.jsx";
 import GamePage from "./pages/GamePage.jsx";
 import LeaderboardPage from "./pages/LeaderboardPage.jsx";
+import AchievementsPage from "./pages/AchievementsPage.jsx";
 import NotFoundPage from "./pages/NotFoundPage.jsx";
 
 export default function App() {
@@ -53,7 +54,16 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="/achievements"
+            element={
+              <ProtectedRoute>
+                <AchievementsPage />
+              </ProtectedRoute>
+            }
+          />
 
+          <Route path="*" element={<NotFoundPage />} />
           <Route path="*" element={<NotFoundPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>

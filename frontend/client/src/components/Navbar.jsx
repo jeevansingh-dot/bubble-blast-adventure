@@ -65,6 +65,12 @@ export default function Navbar() {
             <NavLink to="/leaderboard" style={linkStyle}>
               Leaderboard
             </NavLink>
+                        <NavLink to="/leaderboard" style={linkStyle}>
+              Leaderboard
+            </NavLink>
+            <NavLink to="/achievements" style={linkStyle}>
+              Achievements
+            </NavLink>
           </>
         )}
 

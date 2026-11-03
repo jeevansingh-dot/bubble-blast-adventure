@@ -28,6 +28,7 @@ export default function GamePage() {
   const [session, setSession] = useState(null); // { sessionToken, seed, levelId }
   const [loadError, setLoadError] = useState("");
   const [save, setSave] = useState({ state: "idle", message: "", canRetry: false });
+  const [badges, setBadges] = useState([]); // achievements unlocked by the last game
   const pendingRef = useRef(null); // finished game waiting to be saved
   const startedForRef = useRef(null);
 
@@ -38,6 +39,7 @@ export default function GamePage() {
   async function beginSession() {
     setSession(null);
     setLoadError("");
+    setBadges([]);
     setSave({ state: "idle", message: "", canRetry: false });
     pendingRef.current = null;
     try {
@@ -68,6 +70,7 @@ export default function GamePage() {
         claimedScore: result.score,
       });
       setUser(data.user); // the server's verified progress
+      setBadges(data.newAchievements || []);
       pendingRef.current = null;
       setSave({ state: "saved", message: "", canRetry: false });
     } catch (err) {
@@ -109,16 +112,61 @@ export default function GamePage() {
   const hasNext = id < LEVELS.length;
 
   return (
-    <GameCanvas
-      key={session.sessionToken}
-      level={getLevel(id)}
-      seed={session.seed}
-      saveStatus={save}
-      onFinish={submit}
-      onRetrySave={() => submit(pendingRef.current)}
-      onRestart={beginSession}
-      onNext={hasNext ? () => navigate(`/game/${id + 1}`) : null}
-      onExit={() => navigate("/levels")}
-    />
+    <>
+      {/* new achievements unlocked by the game that just finished */}
+      {badges.length > 0 && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            width: "100%",
+            maxWidth: "440px",
+            marginBottom: "12px",
+            background: "#2b2a05",
+            border: "2px solid #ffd93d",
+            borderRadius: "14px",
+            padding: "10px 14px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: "10px",
+          }}
+        >
+          <div>
+            <strong>🏅 Achievement unlocked!</strong>
+            {badges.map((b) => (
+              <div key={b.id}>
+                {b.icon} {b.name} <span style={{ opacity: 0.8 }}>· {b.description}</span>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => setBadges([])}
+            aria-label="Dismiss"
+            style={{
+              border: "none",
+              background: "transparent",
+              color: "white",
+              fontSize: "18px",
+              cursor: "pointer",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      <GameCanvas
+        key={session.sessionToken}
+        level={getLevel(id)}
+        seed={session.seed}
+        saveStatus={save}
+        onFinish={submit}
+        onRetrySave={() => submit(pendingRef.current)}
+        onRestart={beginSession}
+        onNext={hasNext ? () => navigate(`/game/${id + 1}`) : null}
+        onExit={() => navigate("/levels")}
+      />
+    </>
   );
 }
