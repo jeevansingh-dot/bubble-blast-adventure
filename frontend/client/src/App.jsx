@@ -4,11 +4,15 @@ import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import HomePage from "./pages/HomePage.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import RegisterPage from "./pages/RegisterPage.jsx";
+import DashboardPage from "./pages/DashboardPage.jsx";
 import LevelsPage from "./pages/LevelsPage.jsx";
 import GamePage from "./pages/GamePage.jsx";
 import LeaderboardPage from "./pages/LeaderboardPage.jsx";
 import AchievementsPage from "./pages/AchievementsPage.jsx";
 import NotFoundPage from "./pages/NotFoundPage.jsx";
+
+// a page that only logged-in players can open
+const guard = (page) => <ProtectedRoute>{page}</ProtectedRoute>;
 
 export default function App() {
   return (
@@ -30,41 +34,12 @@ export default function App() {
           <Route path="/register" element={<RegisterPage />} />
 
           {/* only for logged-in players */}
-          <Route
-            path="/levels"
-            element={
-              <ProtectedRoute>
-                <LevelsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/game/:levelId"
-            element={
-              <ProtectedRoute>
-                <GamePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/leaderboard"
-            element={
-              <ProtectedRoute>
-                <LeaderboardPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/achievements"
-            element={
-              <ProtectedRoute>
-                <AchievementsPage />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/dashboard" element={guard(<DashboardPage />)} />
+          <Route path="/levels" element={guard(<LevelsPage />)} />
+          <Route path="/game/:levelId" element={guard(<GamePage />)} />
+          <Route path="/leaderboard" element={guard(<LeaderboardPage />)} />
+          <Route path="/achievements" element={guard(<AchievementsPage />)} />
 
-          <Route path="*" element={<NotFoundPage />} />
-          <Route path="*" element={<NotFoundPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>

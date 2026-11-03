@@ -57,15 +57,16 @@ export default function Navbar() {
         <NavLink to="/" end style={linkStyle}>
           Home
         </NavLink>
-               {user && (
+
+        {user && (
           <>
+            <NavLink to="/dashboard" style={linkStyle}>
+              Dashboard
+            </NavLink>
             <NavLink to="/levels" style={linkStyle}>
               Levels
             </NavLink>
             <NavLink to="/leaderboard" style={linkStyle}>
-              Leaderboard
-            </NavLink>
-                        <NavLink to="/leaderboard" style={linkStyle}>
               Leaderboard
             </NavLink>
             <NavLink to="/achievements" style={linkStyle}>
