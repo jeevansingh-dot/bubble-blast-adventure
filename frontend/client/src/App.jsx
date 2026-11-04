@@ -1,4 +1,5 @@
 import { Route, Routes } from "react-router-dom";
+import BubbleBackground from "./components/BubbleBackground.jsx";
 import Navbar from "./components/Navbar.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 import HomePage from "./pages/HomePage.jsx";
@@ -16,33 +17,45 @@ const guard = (page) => <ProtectedRoute>{page}</ProtectedRoute>;
 
 export default function App() {
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <Navbar />
+    <>
+      <BubbleBackground />
 
-      <main
+      <div
         style={{
-          flex: 1,
+          position: "relative",
+          zIndex: 1,
+          minHeight: "100vh",
           display: "flex",
           flexDirection: "column",
-          alignItems: "center",
-          padding: "24px 12px",
         }}
       >
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+        <Navbar />
 
-          {/* only for logged-in players */}
-          <Route path="/dashboard" element={guard(<DashboardPage />)} />
-          <Route path="/levels" element={guard(<LevelsPage />)} />
-          <Route path="/game/:levelId" element={guard(<GamePage />)} />
-          <Route path="/leaderboard" element={guard(<LeaderboardPage />)} />
-          <Route path="/achievements" element={guard(<AchievementsPage />)} />
+        <main
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            padding: "24px 12px",
+          }}
+        >
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
 
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </main>
-    </div>
+            {/* only for logged-in players */}
+            <Route path="/dashboard" element={guard(<DashboardPage />)} />
+            <Route path="/levels" element={guard(<LevelsPage />)} />
+            <Route path="/game/:levelId" element={guard(<GamePage />)} />
+            <Route path="/leaderboard" element={guard(<LeaderboardPage />)} />
+            <Route path="/achievements" element={guard(<AchievementsPage />)} />
+
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </main>
+      </div>
+    </>
   );
 }

@@ -10,10 +10,19 @@ import gamesRoutes from "./routes/games.js";
 import playerRoutes from "./routes/player.js";
 import leaderboardRoutes from "./routes/leaderboard.js";
 import achievementsRoutes from "./routes/achievements.js";
+
 const app = express();
-app.set("trust proxy", 1);
+app.set("trust proxy", 1); // Render/Vercel send requests through one proxy
+
 app.use(helmet()); // safer HTTP headers
-app.use(cors({ origin: process.env.CLIENT_URL || "http://localhost:5173" }));
+
+// CLIENT_URL can hold several sites separated by commas
+const allowedOrigins = (process.env.CLIENT_URL || "http://localhost:5173")
+  .split(",")
+  .map((url) => url.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
+app.use(cors({ origin: allowedOrigins }));
+
 app.use(express.json({ limit: "100kb" })); // read JSON bodies, reject huge ones
 
 // Quick check that the server (and database) are alive
@@ -30,6 +39,7 @@ app.use("/api/games", gamesRoutes);
 app.use("/api/player", playerRoutes);
 app.use("/api/leaderboard", leaderboardRoutes);
 app.use("/api/achievements", achievementsRoutes);
+
 // Any other URL
 app.use((req, res) => {
   res.status(404).json({ message: "Not found" });
