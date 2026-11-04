@@ -1,75 +1,54 @@
+import { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { GAME_NAME } from "../config/gameConfig.js";
 import { useAuth } from "../context/AuthContext.jsx";
 
-const linkStyle = ({ isActive }) => ({
-  color: isActive ? "#ffd93d" : "white",
-  textDecoration: "none",
-  fontWeight: "bold",
-});
-
-const smallButton = {
-  padding: "6px 14px",
-  fontSize: "15px",
-  fontWeight: "bold",
-  borderRadius: "999px",
-  border: "none",
-  cursor: "pointer",
-  background: "#ffd93d",
-  color: "#1b1b3a",
-  textDecoration: "none",
-};
-
 export default function Navbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [open, setOpen] = useState(false); // mobile menu
+  const close = () => setOpen(false);
 
   async function handleLogout() {
+    close();
     await logout();
     navigate("/");
   }
 
   return (
-    <header
-      style={{
-        width: "100%",
-        boxSizing: "border-box",
-        display: "flex",
-        flexWrap: "wrap",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "10px 20px",
-        padding: "12px 16px",
-        background: "#151a4a",
-      }}
-    >
-      <Link
-        to="/"
-        style={{ color: "#ffd93d", textDecoration: "none", fontWeight: "900", fontSize: "20px" }}
-      >
+    <header className="nav">
+      <Link to="/" className="nav-brand" onClick={close}>
+        <span className="nav-dot" aria-hidden="true" />
         {GAME_NAME}
       </Link>
 
-      <nav
-        aria-label="Main"
-        style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "14px" }}
+      <button
+        className="nav-toggle"
+        aria-label="Toggle menu"
+        aria-expanded={open}
+        aria-controls="main-nav"
+        onClick={() => setOpen((o) => !o)}
       >
-        <NavLink to="/" end style={linkStyle}>
+        {open ? "✕" : "☰"}
+      </button>
+
+      <nav id="main-nav" aria-label="Main" className={`nav-links${open ? " open" : ""}`}>
+        <NavLink to="/" end className="nav-link" onClick={close}>
           Home
         </NavLink>
 
         {user && (
           <>
-            <NavLink to="/dashboard" style={linkStyle}>
+            <NavLink to="/dashboard" className="nav-link" onClick={close}>
               Dashboard
             </NavLink>
-            <NavLink to="/levels" style={linkStyle}>
+            <NavLink to="/levels" className="nav-link" onClick={close}>
               Levels
             </NavLink>
-            <NavLink to="/leaderboard" style={linkStyle}>
+            <NavLink to="/leaderboard" className="nav-link" onClick={close}>
               Leaderboard
             </NavLink>
-            <NavLink to="/achievements" style={linkStyle}>
+            <NavLink to="/achievements" className="nav-link" onClick={close}>
               Achievements
             </NavLink>
           </>
@@ -77,17 +56,17 @@ export default function Navbar() {
 
         {user ? (
           <>
-            <span>Hi, {user.name}</span>
-            <button onClick={handleLogout} style={smallButton}>
+            <span className="nav-user">Hi, {user.name}</span>
+            <button onClick={handleLogout} className="nav-btn">
               Log Out
             </button>
           </>
         ) : (
           <>
-            <NavLink to="/login" style={linkStyle}>
+            <NavLink to="/login" className="nav-link" onClick={close}>
               Log In
             </NavLink>
-            <Link to="/register" style={smallButton}>
+            <Link to="/register" className="nav-btn" onClick={close}>
               Sign Up
             </Link>
           </>
