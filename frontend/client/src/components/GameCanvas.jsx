@@ -105,38 +105,6 @@ function snapshot(g, outcome = null, stars = 0) {
   };
 }
 
-const buttonStyle = {
-  padding: "10px 24px",
-  fontSize: "18px",
-  fontWeight: "bold",
-  borderRadius: "999px",
-  border: "none",
-  cursor: "pointer",
-  background: "#ffd93d",
-};
-
-const smallButtonStyle = {
-  padding: "4px 12px",
-  fontSize: "16px",
-  fontWeight: "bold",
-  borderRadius: "999px",
-  border: "none",
-  cursor: "pointer",
-  background: "#ffd93d",
-};
-
-const overlayStyle = {
-  position: "absolute",
-  inset: 0,
-  borderRadius: "16px",
-  background: "rgba(0,0,0,0.7)",
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: "12px",
-};
-
 const COMBO_CSS = `
 @keyframes comboPop {
   0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
@@ -541,57 +509,50 @@ export default function GameCanvas({
     <div style={{ width: BOARD_WIDTH, maxWidth: "100%" }}>
       <style>{COMBO_CSS}</style>
 
-      {/* HUD */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "6px",
-          fontSize: "20px",
-          fontWeight: "bold",
-          marginBottom: "8px",
-        }}
-      >
-        {onExit ? (
-          <button onClick={onExit} style={smallButtonStyle}>
+      {/* HUD: kept above the board so it never covers the play area */}
+      <div className="hud">
+        {onExit && (
+          <button onClick={onExit} className="icon-btn back-btn">
             ☰ Levels
           </button>
-        ) : (
-          <span>Level {level.id}</span>
         )}
-        <span>🎯 {hud.shots}</span>
-        <span>⭐ {hud.score}</span>
-        {hud.combo >= 2 && <span>🔥 x{hud.combo}</span>}
-        <span style={{ display: "flex", gap: "6px" }}>
-          <button
-            onClick={togglePause}
-            aria-label="Pause game"
-            style={{ ...smallButtonStyle, fontSize: "18px", padding: "4px 10px" }}
-          >
+
+        <div className="hud-pills">
+          <span className="pill">Level {level.id}</span>
+          <span className="pill" aria-label={`${hud.shots} shots left`}>
+            🎯 {hud.shots}
+          </span>
+          <span className="pill" aria-label={`Score ${hud.score}`}>
+            ⭐ {hud.score}
+          </span>
+          {hud.combo >= 2 && <span className="pill hot">🔥 x{hud.combo}</span>}
+        </div>
+
+        <div className="hud-actions">
+          <button onClick={togglePause} aria-label="Pause game" className="icon-btn">
             ⏸
           </button>
           <button
             onClick={toggleMusic}
             aria-label={musicOn ? "Turn music off" : "Turn music on"}
-            style={{ ...smallButtonStyle, fontSize: "18px", padding: "4px 10px" }}
+            className="icon-btn"
           >
             {musicOn ? "🎵" : "🔕"}
           </button>
           <button
             onClick={toggleSound}
             aria-label={soundOn ? "Turn sound off" : "Turn sound on"}
-            style={{ ...smallButtonStyle, fontSize: "18px", padding: "4px 10px" }}
+            className="icon-btn"
           >
             {soundOn ? "🔊" : "🔇"}
           </button>
-        </span>
+        </div>
       </div>
 
-      <div style={{ position: "relative" }}>
+      <div className="board-frame">
         <canvas
           ref={canvasRef}
+          className="board-canvas"
           width={BOARD_WIDTH}
           height={CANVAS_HEIGHT}
           onPointerMove={updateAim}
@@ -599,13 +560,6 @@ export default function GameCanvas({
           onPointerUp={(e) => {
             updateAim(e);
             shoot();
-          }}
-          style={{
-            width: "100%",
-            display: "block",
-            borderRadius: "16px",
-            background: "linear-gradient(#1b2a6b, #3b1f6e)",
-            touchAction: "none",
           }}
         />
 
@@ -633,20 +587,20 @@ export default function GameCanvas({
 
         {/* PAUSED overlay */}
         {paused && !hud.outcome && (
-          <div role="dialog" aria-label="Game paused" style={overlayStyle}>
-            <h2 style={{ fontSize: "36px", margin: 0 }}>PAUSED</h2>
-            <button onClick={togglePause} style={buttonStyle}>
+          <div role="dialog" aria-label="Game paused" className="overlay">
+            <h2>PAUSED</h2>
+            <button onClick={togglePause} className="btn">
               ▶ Resume
             </button>
-            <button onClick={restart} style={buttonStyle}>
+            <button onClick={restart} className="btn secondary">
               ↻ Restart
             </button>
             {onExit && (
-              <button onClick={onExit} style={buttonStyle}>
+              <button onClick={onExit} className="btn secondary">
                 ☰ Levels
               </button>
             )}
-            <p style={{ fontSize: "14px", margin: 0, opacity: 0.8, textAlign: "center" }}>
+            <p style={{ fontSize: "13px", margin: 0, opacity: 0.8 }}>
               Esc = Pause · R = Restart · Space = Shoot
               <br />1 = Bomb · 2 = Rainbow · H = Hint
             </p>
@@ -655,21 +609,33 @@ export default function GameCanvas({
 
         {/* Level complete / failed overlay */}
         {hud.outcome && (
-          <div style={overlayStyle}>
-            <h2 style={{ fontSize: "32px", margin: 0 }}>
+          <div className="overlay">
+            <h2 className={hud.outcome === "WON" ? "win-title" : ""}>
               {hud.outcome === "WON" ? "🎉 LEVEL COMPLETE!" : "LEVEL FAILED"}
             </h2>
 
             {hud.outcome === "WON" && (
-              <div style={{ fontSize: "48px" }}>
-                {[1, 2, 3].map((n) => (hud.stars >= n ? "★" : "☆"))}
+              <div
+                className="stars-row"
+                role="img"
+                aria-label={`${hud.stars} of 3 stars`}
+              >
+                {[1, 2, 3].map((n) => (
+                  <span
+                    key={n}
+                    className={`star${hud.stars >= n ? " on" : ""}`}
+                    style={{ animationDelay: `${0.2 + n * 0.25}s` }}
+                  >
+                    ★
+                  </span>
+                ))}
               </div>
             )}
 
-            <p style={{ fontSize: "20px", margin: 0 }}>Score: {hud.score}</p>
-            <p style={{ fontSize: "18px", margin: 0 }}>
-              🔥 Best Combo: x{Math.max(hud.bestCombo, 1)}
-            </p>
+            <div className="overlay-stats">
+              <span className="pill">Score: {hud.score}</span>
+              <span className="pill">🔥 Best Combo: x{Math.max(hud.bestCombo, 1)}</span>
+            </div>
 
             {/* saving the verified result on the server */}
             {saving && (
@@ -683,31 +649,28 @@ export default function GameCanvas({
               </p>
             )}
             {saveStatus?.state === "error" && (
-              <div role="alert" style={{ textAlign: "center", maxWidth: "90%" }}>
+              <div role="alert" style={{ maxWidth: "90%" }}>
                 <p style={{ margin: "0 0 8px" }}>⚠️ {saveStatus.message}</p>
                 {saveStatus.canRetry && onRetrySave && (
-                  <button onClick={onRetrySave} style={smallButtonStyle}>
+                  <button onClick={onRetrySave} className="btn secondary">
                     Try saving again
                   </button>
                 )}
               </div>
             )}
 
-            <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", justifyContent: "center" }}>
-              <button
-                onClick={restart}
-                disabled={saving}
-                style={{ ...buttonStyle, opacity: saving ? 0.5 : 1, cursor: saving ? "not-allowed" : "pointer" }}
-              >
+            <div className="btn-row">
+              {hud.outcome === "WON" && onNext && (
+                <button onClick={onNext} disabled={!nextReady} className="btn">
+                  Next Level ▶
+                </button>
+              )}
+              <button onClick={restart} disabled={saving} className="btn secondary">
                 {hud.outcome === "WON" ? "Replay" : "Retry"}
               </button>
-              {hud.outcome === "WON" && onNext && (
-                <button
-                  onClick={onNext}
-                  disabled={!nextReady}
-                  style={{ ...buttonStyle, opacity: nextReady ? 1 : 0.5, cursor: nextReady ? "pointer" : "not-allowed" }}
-                >
-                  Next Level
+              {onExit && (
+                <button onClick={onExit} className="btn secondary">
+                  Levels
                 </button>
               )}
             </div>
@@ -716,15 +679,7 @@ export default function GameCanvas({
       </div>
 
       {/* Booster + hint bar */}
-      <div
-        style={{
-          display: "flex",
-          gap: "12px",
-          justifyContent: "center",
-          flexWrap: "wrap",
-          marginTop: "12px",
-        }}
-      >
+      <div className="power-bar">
         {BOOSTERS.map((b) => {
           const count = hud.boosters[b.id];
           const armed = hud.armed === b.id;
@@ -736,17 +691,13 @@ export default function GameCanvas({
               disabled={disabled}
               aria-pressed={armed}
               aria-label={`${b.name} booster, ${count} left. Key ${b.key}`}
-              style={{
-                ...buttonStyle,
-                minWidth: "96px",
-                padding: "12px 18px",
-                background: armed ? "#ff7a3d" : "#ffd93d",
-                outline: armed ? "3px solid white" : "none",
-                opacity: disabled ? 0.45 : 1,
-                cursor: disabled ? "not-allowed" : "pointer",
-              }}
+              className={`power-btn${armed ? " armed" : ""}`}
             >
-              {b.icon} {count}
+              <span className="power-icon" aria-hidden="true">
+                {b.icon}
+              </span>
+              <span className="power-label">{b.name}</span>
+              <span className="badge">{count}</span>
             </button>
           );
         })}
@@ -755,27 +706,17 @@ export default function GameCanvas({
           onClick={showHint}
           disabled={barDisabled || hud.hints <= 0}
           aria-label={`Hint, ${hud.hints} left. Key H`}
-          style={{
-            ...buttonStyle,
-            minWidth: "96px",
-            padding: "12px 18px",
-            opacity: barDisabled || hud.hints <= 0 ? 0.45 : 1,
-            cursor: barDisabled || hud.hints <= 0 ? "not-allowed" : "pointer",
-          }}
+          className="power-btn"
         >
-          💡 {hud.hints}
+          <span className="power-icon" aria-hidden="true">
+            💡
+          </span>
+          <span className="power-label">Hint</span>
+          <span className="badge">{hud.hints}</span>
         </button>
       </div>
 
-      <p
-        aria-live="polite"
-        style={{
-          textAlign: "center",
-          minHeight: "22px",
-          margin: "8px 0 0",
-          fontSize: "15px",
-        }}
-      >
+      <p aria-live="polite" className="status-line">
         {statusLine}
       </p>
     </div>
