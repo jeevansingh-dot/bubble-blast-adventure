@@ -27,6 +27,11 @@ export function difficultyOf(id) {
   return "expert";
 }
 
+// Levels 1 to 5 teach the basics (clear all). After that the objective changes every level.
+const OBJECTIVE_CYCLE = ["clear_all", "rescue", "color_hunt", "score", "drop", "combo"];
+export const objectiveTypeOf = (id) =>
+  id <= 5 ? "clear_all" : OBJECTIVE_CYCLE[(id - 6) % OBJECTIVE_CYCLE.length];
+
 // Fewer shots per bubble = harder
 const SHOT_FACTOR = {
   tutorial: 0.75,
@@ -98,24 +103,98 @@ export function generateLevel(id) {
   const board = boardFromLayout(layout);
   findFloatingBubbles(board).forEach(([r, c]) => (board[r][c] = null));
 
+  // ---- objective ----
+  let type = objectiveTypeOf(id);
+  let objective = { type: "clear_all" };
+
+  if (type === "rescue") {
+    // hide baby chicks (eggs) inside the formation, never in the top row
+    const cells = [];
+    for (let r = 1; r < rows; r++) {
+      board[r].forEach((b, c) => {
+        if (b) cells.push([r, c]);
+      });
+    }
+    const eggCount = Math.min(5, 2 + Math.floor(id / 12));
+    if (cells.length >= eggCount + 6) {
+      for (let k = 0; k < eggCount; k++) {
+        const [r, c] = cells.splice(Math.floor(rng() * cells.length), 1)[0];
+        board[r][c] = { color: "egg", type: "creature" };
+      }
+      objective = { type: "rescue", target: eggCount };
+    } else {
+      type = "clear_all";
+    }
+  }
+
   let count = 0;
+  const perColor = {};
+  board.slice(0, rows).forEach((row) =>
+    row.forEach((b) => {
+      if (!b) return;
+      count++;
+      if (b.type !== "creature") perColor[b.color] = (perColor[b.color] || 0) + 1;
+    })
+  );
+
+  if (type === "color_hunt") {
+    const options = Object.keys(perColor).filter((c) => perColor[c] >= 3);
+    let k = id < 22 ? 1 : 2;
+    if (options.length < 2) k = 1;
+    if (options.length === 0) {
+      type = "clear_all";
+    } else {
+      const picked = [];
+      for (let i = 0; i < k; i++) {
+        picked.push(options.splice(Math.floor(rng() * options.length), 1)[0]);
+      }
+      objective = { type: "color_hunt", colors: picked };
+    }
+  } else if (type === "score") {
+    objective = { type: "score", target: round10(count * 11) };
+  } else if (type === "drop") {
+    objective = { type: "drop", target: Math.max(6, Math.round(count * 0.2)) };
+  } else if (type === "combo") {
+    objective = { type: "combo", target: id < 25 ? 3 : id < 36 ? 4 : 5 };
+  }
+
+  // star thresholds depend on the objective (a score level ends earlier than "clear all")
+  let starThresholds;
+  switch (objective.type) {
+    case "rescue": {
+      const base = objective.target * 100;
+      starThresholds = [round10(base + count * 3), round10(base + count * 8), round10(base + count * 14)];
+      break;
+    }
+    case "color_hunt":
+      starThresholds = [round10(count * 4), round10(count * 9), round10(count * 15)];
+      break;
+    case "score":
+      starThresholds = [
+        objective.target,
+        round10(objective.target * 1.4),
+        round10(objective.target * 1.9),
+      ];
+      break;
+    case "drop":
+    case "combo":
+      starThresholds = [round10(count * 5), round10(count * 10), round10(count * 16)];
+      break;
+    default:
+      starThresholds = [round10(count * 10), round10(count * 22), round10(count * 32)];
+  }
+
   const finalLayout = board.slice(0, rows).map((row) =>
-    row
-      .map((b) => {
-        if (!b) return ".";
-        count++;
-        return COLOR_TO_LETTER[b.color];
-      })
-      .join("")
+    row.map((b) => (b ? COLOR_TO_LETTER[b.color] : ".")).join("")
   );
 
   return {
     id,
     difficulty,
-    objective: { type: "clear_all" },
+    objective,
     shots: Math.max(10, Math.ceil(count * SHOT_FACTOR[difficulty])),
     colors,
-    starThresholds: [round10(count * 10), round10(count * 22), round10(count * 32)],
+    starThresholds,
     layout: finalLayout,
   };
 }

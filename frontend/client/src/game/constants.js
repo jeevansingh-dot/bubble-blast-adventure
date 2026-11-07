@@ -15,4 +15,5 @@ export const LETTER_TO_COLOR = {
   y: "yellow",
   p: "purple",
   o: "orange",
+  e: "egg", // a baby chick egg (rescue levels), not a normal colour
 };

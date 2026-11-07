@@ -33,13 +33,14 @@ export function createBoard(maxRows = MAX_ROWS) {
   );
 }
 
-// layout example: ["rrbbggyypp.", "rbgypo...."]  ('.' = empty)
+// layout example: ["rrbbggyypp.", "rbgypo...."]  ('.' = empty, 'e' = baby chick egg)
 export function boardFromLayout(layout, maxRows = MAX_ROWS) {
   const board = createBoard(maxRows);
   layout.forEach((row, r) => {
     [...row].forEach((ch, c) => {
-      if (inBounds(r, c, maxRows) && LETTER_TO_COLOR[ch]) {
-        board[r][c] = { color: LETTER_TO_COLOR[ch], type: "normal" };
+      const color = LETTER_TO_COLOR[ch];
+      if (inBounds(r, c, maxRows) && color) {
+        board[r][c] = { color, type: color === "egg" ? "creature" : "normal" };
       }
     });
   });

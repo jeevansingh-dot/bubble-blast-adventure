@@ -35,10 +35,12 @@ function resolveBomb(board, r, c) {
 }
 
 // Rainbow: becomes whichever neighbouring colour gives the biggest group
+// (eggs are not a colour, so they are ignored)
 function pickRainbowColor(board, r, c) {
   const options = new Set();
   for (const [nr, nc] of getNeighbors(r, c, board.length)) {
-    if (board[nr][nc]) options.add(board[nr][nc].color);
+    const nb = board[nr][nc];
+    if (nb && nb.type !== "creature") options.add(nb.color);
   }
   if (options.size === 0) return COLORS[0];
 

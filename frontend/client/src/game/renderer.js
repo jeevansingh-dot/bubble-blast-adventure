@@ -10,10 +10,45 @@ export const COLOR_HEX = {
   orange: "#ff9a3d",
   bomb: "#3a3a52",
   rainbow: "#ff7ad9",
+  egg: "#ffe6b8",
 };
 
-// One glossy bubble (also draws the special Bomb and Rainbow bubbles)
+// A baby chick egg (rescue levels): cream shell with a little chick inside
+function drawEgg(ctx, x, y, radius) {
+  const shell = ctx.createRadialGradient(
+    x - radius * 0.3,
+    y - radius * 0.35,
+    radius * 0.1,
+    x,
+    y,
+    radius
+  );
+  shell.addColorStop(0, "#ffffff");
+  shell.addColorStop(1, "#ffd9a0");
+
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = shell;
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "#e0a64a";
+  ctx.stroke();
+
+  ctx.save();
+  ctx.font = `${Math.round(radius * 1.15)}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("🐣", x, y + 1);
+  ctx.restore();
+}
+
+// One glossy bubble (also draws Bomb, Rainbow and the rescue egg)
 export function drawBubble(ctx, x, y, color, radius = R - 1) {
+  if (color === "egg") {
+    drawEgg(ctx, x, y, radius);
+    return;
+  }
+
   const base = COLOR_HEX[color] || "#cccccc";
 
   let fill;
@@ -124,6 +159,7 @@ export function drawLauncher(ctx, x, y, angle, currentColor, nextColor) {
   ctx.textAlign = "center";
   ctx.fillText("NEXT", x - 70, y + 40);
 }
+
 // Hint: golden line along the suggested shot + a ring on the target cell
 export function drawHint(ctx, path, cell) {
   if (path.length < 2) return;

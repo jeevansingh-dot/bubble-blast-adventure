@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { BOARD_WIDTH } from "../game/constants.js";
-import { boardFromLayout, cellToPixel, forEachBubble } from "../game/hexGrid.js";
+import { boardFromLayout, cellToPixel } from "../game/hexGrid.js";
 import { traceShot } from "../game/collision.js";
 import { resolveShot } from "../game/shotResolver.js";
 import { findBestShot } from "../game/hint.js";
 import { makeRng } from "../game/rng.js";
 import { pickColor } from "../game/bubbleQueue.js";
+import { calculateShotScore, calculateStars } from "../game/scoreManager.js";
 import {
-  calculateScore,
-  calculateBombScore,
-  calculateStars,
-} from "../game/scoreManager.js";
+  isObjectiveComplete,
+  objectiveProgress,
+  countBubbles,
+} from "../game/objectiveManager.js";
 import {
   createEffects,
   addPop,
@@ -57,12 +58,6 @@ const BOOSTERS = [
   { id: "rainbow", icon: "🌈", name: "Rainbow", key: "2", info: "matches with any colour" },
 ];
 
-function countBubbles(board) {
-  let n = 0;
-  forEachBubble(board, () => n++);
-  return n;
-}
-
 // Fresh game state for a level. `seed` makes the bubble queue repeatable,
 // so the server can replay exactly this game.
 function createGame(level, seed) {
@@ -86,6 +81,7 @@ function createGame(level, seed) {
     shots: level.shots,
     combo: 0, // consecutive successful shots
     bestCombo: 0,
+    floatingDropped: 0, // bubbles that fell (for "Drop" levels)
     effects: createEffects(),
   };
 }
@@ -97,6 +93,7 @@ function snapshot(g, outcome = null, stars = 0) {
     shots: g.shots,
     combo: g.combo,
     bestCombo: g.bestCombo,
+    floatingDropped: g.floatingDropped,
     boosters: { ...g.boosters },
     hints: g.hints,
     armed: g.armed,
@@ -359,11 +356,9 @@ export default function GameCanvas({
       g.combo = 0;
     }
 
-    const combo = Math.max(g.combo, 1);
-    g.score +=
-      result.special === "bomb"
-        ? calculateBombScore(result.popped.length, result.floating.length, combo)
-        : calculateScore(result.popped.length, result.floating.length, combo);
+    // same function the server uses (includes the +100 for every chick rescued)
+    g.score += calculateShotScore(result, Math.max(g.combo, 1));
+    g.floatingDropped += result.floating.length;
     g.shots -= 1;
 
     // sounds (pitch goes higher with bigger groups and higher combos)
@@ -384,15 +379,23 @@ export default function GameCanvas({
       addFall(g.effects, x, y, b.color);
     }
 
-    // decide the result now, but show it after the animations finish
+    // decide the result now, but show it after the animations finish.
+    // The level is won the moment its OBJECTIVE is complete.
     let outcome = null;
     let stars = 0;
-    if (countBubbles(g.board) === 0) {
+    const objectiveDone = isObjectiveComplete(level.objective, {
+      board: g.board,
+      score: g.score,
+      floatingDropped: g.floatingDropped,
+      bestCombo: g.bestCombo,
+    });
+
+    if (objectiveDone) {
       outcome = "WON";
       // a win always gives at least 1 star
       stars = Math.max(1, calculateStars(g.score, level.starThresholds));
-    } else if (g.shots <= 0) {
-      outcome = "LOST";
+    } else if (countBubbles(g.board) === 0 || g.shots <= 0) {
+      outcome = "LOST"; // no bubbles left to work with, or out of shots
     }
 
     g.status = "RESOLVING"; // blocks shooting while animations play
@@ -500,6 +503,14 @@ export default function GameCanvas({
   const armedInfo = BOOSTERS.find((b) => b.id === hud.armed);
   const barDisabled = paused || !!hud.outcome;
 
+  // e.g. "🐣 Rescue 3 chicks · 1/3 rescued"
+  const objectiveText = objectiveProgress(level.objective, {
+    board: gameRef.current.board,
+    score: hud.score,
+    floatingDropped: hud.floatingDropped,
+    bestCombo: hud.bestCombo,
+  });
+
   let statusLine = "Tap a booster to arm it (uses 1 booster + 1 shot)";
   if (hintText) statusLine = hintText;
   else if (armedInfo)
@@ -547,6 +558,11 @@ export default function GameCanvas({
             {soundOn ? "🔊" : "🔇"}
           </button>
         </div>
+      </div>
+
+      {/* what the player has to do in this level */}
+      <div className="objective-bar" role="status">
+        {objectiveText}
       </div>
 
       <div className="board-frame">
@@ -630,6 +646,10 @@ export default function GameCanvas({
                   </span>
                 ))}
               </div>
+            )}
+
+            {hud.outcome === "LOST" && (
+              <p style={{ margin: 0, opacity: 0.9 }}>Objective incomplete: {objectiveText}</p>
             )}
 
             <div className="overlay-stats">
