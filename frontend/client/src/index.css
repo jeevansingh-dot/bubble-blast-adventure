@@ -343,6 +343,7 @@ button:not(:disabled):hover {
   box-shadow: none;
   color: #8a91c4;
   cursor: not-allowed;
+<<<<<<< HEAD
 }
 /* ---------- game screen ---------- */
 .hud {
@@ -459,3 +460,6 @@ button:not(:disabled):hover {
   border: 2px solid #0a0f2e;
 }
 .power-btn:not(:disabled):hover
+=======
+}
+>>>>>>> f14adaee1a37b282936ed42c59ef21a0fcec6e6a
