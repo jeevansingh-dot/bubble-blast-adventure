@@ -13,6 +13,7 @@ export const ACHIEVEMENTS = [
   { id: "booster_expert", name: "Booster Expert", icon: "🧨", description: "Use 25 boosters", target: 25, value: (s) => s.boostersUsedTotal },
   { id: "perfect_aim", name: "Perfect Aim", icon: "🏹", description: "Clear a level using 60% of its shots or fewer", target: 1, value: (s) => s.perfectAim },
   { id: "bubble_legend", name: "Bubble Legend", icon: "🏆", description: "Earn 100,000 points", target: 100000, value: (s) => s.totalScore },
+  { id: "rescue_hero", name: "Rescue Hero", icon: "🐣", description: "Rescue 25 baby chicks", target: 25, value: (s) => s.rescuedObjects },
 ];
 
 // `extra.perfectAim` is true only for the game that was just verified
@@ -24,6 +25,7 @@ function statsFor(user, extra = {}) {
     bubblesPopped: user.bubblesPopped,
     bestCombo: user.bestCombo,
     boostersUsedTotal: user.boostersUsedTotal || 0,
+    rescuedObjects: user.rescuedObjects || 0,
     threeStarLevels: user.completedLevels.filter((l) => l.stars === 3).length,
     perfectAim: extra.perfectAim ? 1 : 0,
   };

@@ -1,12 +1,13 @@
 import {
   boardFromLayout,
   getNeighbors,
-  forEachBubble,
   traceShot,
   resolveShot,
-  calculateScore,
-  calculateBombScore,
+  calculateShotScore,
+  countRescued,
   calculateStars,
+  isObjectiveComplete,
+  countBubbles,
   pickColor,
   makeRng,
   BOARD_WIDTH,
@@ -26,12 +27,6 @@ export class CheatError extends Error {
     super(message);
     this.name = "CheatError";
   }
-}
-
-function countBubbles(board) {
-  let n = 0;
-  forEachBubble(board, () => n++);
-  return n;
 }
 
 // The browser tells us where the bubble landed. We simulate the shot ourselves and
@@ -62,6 +57,7 @@ export function replayGame(level, seed, shots) {
   if (shots.length === 0) throw new CheatError("No shots were fired");
   if (shots.length > level.shots) throw new CheatError("More shots than the level allows");
 
+  const objective = level.objective || { type: "clear_all" };
   const limits = { ...DEFAULT_BOOSTERS, ...(level.boosters || {}) };
   const used = { bomb: 0, rainbow: 0 };
 
@@ -74,10 +70,13 @@ export function replayGame(level, seed, shots) {
   let combo = 0;
   let bestCombo = 0;
   let removed = 0;
+  let floatingDropped = 0;
+  let rescued = 0;
   let completed = false;
+  let ended = false; // objective done, or nothing left on the board
 
   for (const s of shots) {
-    if (completed) throw new CheatError("Shots fired after the level was cleared");
+    if (ended) throw new CheatError("Shots fired after the level ended");
 
     if (
       !s ||
@@ -119,14 +118,20 @@ export function replayGame(level, seed, shots) {
     } else {
       combo = 0;
     }
-    const mult = Math.max(combo, 1);
-    score +=
-      result.special === "bomb"
-        ? calculateBombScore(result.popped.length, result.floating.length, mult)
-        : calculateScore(result.popped.length, result.floating.length, mult);
-    removed += result.popped.length + result.floating.length;
 
-    if (countBubbles(board) === 0) completed = true;
+    // the same scoring function the browser uses
+    score += calculateShotScore(result, Math.max(combo, 1));
+    removed += result.popped.length + result.floating.length;
+    floatingDropped += result.floating.length;
+    rescued += countRescued(result);
+
+    completed = isObjectiveComplete(objective, {
+      board,
+      score,
+      floatingDropped,
+      bestCombo,
+    });
+    if (completed || countBubbles(board) === 0) ended = true;
   }
 
   return {
@@ -135,6 +140,7 @@ export function replayGame(level, seed, shots) {
     stars: completed ? Math.max(1, calculateStars(score, level.starThresholds)) : 0,
     bubblesPopped: removed,
     bestCombo,
+    rescued,
     shotsUsed: shots.length,
     boostersUsed: used,
   };

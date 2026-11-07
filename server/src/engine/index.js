@@ -5,10 +5,14 @@ export { boardFromLayout, getNeighbors, forEachBubble } from "../../../frontend/
 export { traceShot } from "../../../frontend/client/src/game/collision.js";
 export { resolveShot } from "../../../frontend/client/src/game/shotResolver.js";
 export {
-  calculateScore,
-  calculateBombScore,
+  calculateShotScore,
+  countRescued,
   calculateStars,
 } from "../../../frontend/client/src/game/scoreManager.js";
+export {
+  isObjectiveComplete,
+  countBubbles,
+} from "../../../frontend/client/src/game/objectiveManager.js";
 export { pickColor } from "../../../frontend/client/src/game/bubbleQueue.js";
 export { makeRng } from "../../../frontend/client/src/game/rng.js";
 export { BOARD_WIDTH } from "../../../frontend/client/src/game/constants.js";

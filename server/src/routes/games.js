@@ -7,6 +7,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { getLevel } from "../engine/index.js";
 import { replayGame, CheatError } from "../services/validateSession.js";
 import { checkNewAchievements } from "../services/achievements.js";
+
 const router = Router();
 
 // every game route needs a logged-in player
@@ -152,6 +153,7 @@ router.post("/complete", async (req, res, next) => {
       stars: result.stars,
       bestCombo: result.bestCombo,
       boostersUsed: result.boostersUsed,
+      objective: level.objective?.type || "clear_all",
       // the browser's own number is only used to spot tampering
       suspicious: typeof claimedScore === "number" && claimedScore !== result.score,
     });
@@ -176,9 +178,10 @@ router.post("/complete", async (req, res, next) => {
     // total score = sum of best scores per level, so replaying cannot inflate it
     user.totalStars = user.completedLevels.reduce((sum, l) => sum + l.stars, 0);
     user.totalScore = user.completedLevels.reduce((sum, l) => sum + l.bestScore, 0);
-       user.bubblesPopped += result.bubblesPopped;
+    user.bubblesPopped += result.bubblesPopped;
     user.bestCombo = Math.max(user.bestCombo, result.bestCombo);
     user.boostersUsedTotal += result.boostersUsed.bomb + result.boostersUsed.rainbow;
+    user.rescuedObjects += result.rescued;
 
     // achievements are checked with the VERIFIED numbers only
     const perfectAim = result.completed && result.shotsUsed <= Math.floor(level.shots * 0.6);

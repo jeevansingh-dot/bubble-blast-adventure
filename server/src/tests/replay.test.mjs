@@ -2,24 +2,26 @@ import assert from "node:assert/strict";
 import { replayGame, CheatError } from "../src/services/validateSession.js";
 import {
   boardFromLayout, traceShot, resolveShot, pickColor, makeRng,
-  calculateScore, forEachBubble, BOARD_WIDTH, getLevel,
+  calculateShotScore, countRescued, isObjectiveComplete, countBubbles,
+  BOARD_WIDTH, getLevel,
 } from "../src/engine/index.js";
 import { findBestShot } from "../../frontend/client/src/game/hint.js";
 
 const X = BOARD_WIDTH / 2, Y = 540;
 const MIN = (15 * Math.PI) / 180, MAX = Math.PI - MIN;
-const count = (b) => { let n = 0; forEachBubble(b, () => n++); return n; };
 
 // A "browser": plays a level the same way GameCanvas does and records every shot
 function playLikeBrowser(level, seed) {
+  const objective = level.objective || { type: "clear_all" };
   const board = boardFromLayout(level.layout);
   const rng = makeRng(seed);
   let current = pickColor(board, rng);
   let next = pickColor(board, rng);
   const shots = [];
-  let score = 0, combo = 0;
+  let score = 0, combo = 0, bestCombo = 0, floatingDropped = 0, rescued = 0;
+  let completed = false, ended = false;
 
-  for (let i = 0; i < level.shots && count(board) > 0; i++) {
+  for (let i = 0; i < level.shots && !ended; i++) {
     const color = current;
     const best = findBestShot(board, X, Y, color, MIN, MAX);
     const angle = best ? best.angle : Math.PI / 2;
@@ -28,10 +30,15 @@ function playLikeBrowser(level, seed) {
     next = pickColor(board, rng);
     const res = resolveShot(board, cell.r, cell.c, color);
     combo = res.matched ? combo + 1 : 0;
-    score += calculateScore(res.popped.length, res.floating.length, Math.max(combo, 1));
+    bestCombo = Math.max(bestCombo, combo);
+    score += calculateShotScore(res, Math.max(combo, 1));
+    floatingDropped += res.floating.length;
+    rescued += countRescued(res);
+    completed = isObjectiveComplete(objective, { board, score, floatingDropped, bestCombo });
+    if (completed || countBubbles(board) === 0) ended = true;
     shots.push({ angle, color, r: cell.r, c: cell.c });
   }
-  return { shots, score, won: count(board) === 0 };
+  return { shots, score, won: completed, rescued };
 }
 
 // 1. a tiny level the bot wins at once
@@ -44,21 +51,50 @@ assert.equal(out.score, game.score, "server score equals browser score");
 assert.equal(out.score, 60);
 assert.equal(out.stars, 3);
 
-// 2. real levels: server must agree with the browser (win or lose)
-for (const id of [1, 12, 30]) {
+// 2. rescue: freeing the egg gives +100 and counts as rescued
+const rescueLevel = {
+  id: 98, layout: ["rr", "e"], shots: 5, starThresholds: [10, 20, 30],
+  objective: { type: "rescue", target: 1 },
+};
+game = playLikeBrowser(rescueLevel, 7);
+assert.ok(game.won, "bot rescued the chick");
+out = replayGame(rescueLevel, 7, game.shots);
+assert.equal(out.completed, true);
+assert.equal(out.rescued, 1);
+assert.equal(out.score, game.score);
+assert.equal(out.score, 180, "30+30 match, 20 for the falling egg, +100 rescue");
+
+// 3. a score level ends the moment the target is reached: more shots are cheating
+const scoreLevel = {
+  id: 97, layout: ["rr"], shots: 5, starThresholds: [10, 20, 30],
+  objective: { type: "score", target: 10 },
+};
+game = playLikeBrowser(scoreLevel, 3);
+assert.ok(game.won);
+assert.equal(replayGame(scoreLevel, 3, game.shots).completed, true);
+assert.throws(
+  () => replayGame(scoreLevel, 3, [...game.shots, ...game.shots]),
+  CheatError,
+  "shots after the objective was completed"
+);
+
+// 4. real levels with every objective type: server must agree with the browser
+for (const id of [1, 6, 7, 8, 9, 10, 11, 12, 13, 14, 30]) {
   const lvl = getLevel(id);
   for (const seed of [1, 777, 424242]) {
     const g = playLikeBrowser(lvl, seed);
     const o = replayGame(lvl, seed, g.shots);
-    assert.equal(o.score, g.score, `level ${id} seed ${seed}: score matches`);
-    assert.equal(o.completed, g.won, `level ${id} seed ${seed}: result matches`);
+    assert.equal(o.score, g.score, `level ${id} (${lvl.objective.type}) seed ${seed}: score matches`);
+    assert.equal(o.completed, g.won, `level ${id} (${lvl.objective.type}) seed ${seed}: result matches`);
+    assert.equal(o.rescued, g.rescued, `level ${id} seed ${seed}: rescued matches`);
   }
 }
 
-// 3. cheats are caught
+// 5. cheats are caught
 const bad = (shots, seed = 12345, lvl = tiny) =>
   assert.throws(() => replayGame(lvl, seed, shots), CheatError);
 
+game = playLikeBrowser(tiny, 12345);
 const good = game.shots;
 bad([{ ...good[0], color: "blue" }]);                      // colour not in queue
 bad([{ ...good[0], angle: 0.1 }]);                         // impossible angle
@@ -70,7 +106,7 @@ bad([{ ...good[0], color: "bomb" }, { ...good[0], color: "bomb" }, { ...good[0],
 assert.throws(() => replayGame(tiny, 12345, "nope"), CheatError);           // not even a list
 assert.throws(() => replayGame(tiny, 12345, [{ angle: "x" }]), CheatError); // malformed
 
-// 4. wrong seed = different queue = rejected
+// 6. wrong seed = different queue = rejected
 const lvl12 = getLevel(12);
 const g12 = playLikeBrowser(lvl12, 5);
 let rejected = false;
