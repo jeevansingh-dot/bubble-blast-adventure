@@ -1,10 +1,8 @@
 import axios from 'axios';
 
 const API = axios.create({
-  baseURL: 'http://localhost:5001/api',
-  headers: {
-    'Content-Type': 'application/json',
-  },
+ 
+  baseURL: import.meta.env.VITE_API_URL || 'https://your-backend-render-app.onrender.com/api',
 });
 
 // Automatically attach token to every request
