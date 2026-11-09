@@ -1,23 +1,52 @@
-// 14 bubbles floating upward behind every page (pure CSS animation, very light)
-const BUBBLES = Array.from({ length: 14 }, (_, i) => ({
-  size: 24 + ((i * 37) % 56),
-  left: (i * 71) % 100,
-  duration: 14 + ((i * 5) % 12),
-  delay: -((i * 3) % 14), // negative = already in motion when the page opens
-}));
+import React, { useMemo } from 'react';
 
 export default function BubbleBackground() {
+  // Generate random bubble positions, sizes, and delays
+  const bubbles = useMemo(() => {
+    return Array.from({ length: 18 }).map((_, i) => {
+      const size = Math.floor(Math.random() * 45) + 25; // 25px to 70px
+      const left = Math.random() * 95; // 0% to 95% width
+      const duration = Math.random() * 10 + 10; // 10s to 20s
+      const delay = Math.random() * 8; // 0s to 8s delay
+      const opacity = (Math.random() * 0.4 + 0.4).toFixed(2);
+
+      return {
+        id: i,
+        size,
+        left,
+        duration,
+        delay,
+        opacity
+      };
+    });
+  }, []);
+
   return (
-    <div className="bubble-bg" aria-hidden="true">
-      {BUBBLES.map((b, i) => (
-        <span
-          key={i}
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      width: '100vw',
+      height: '100vh',
+      overflow: 'hidden',
+      zIndex: 0,
+      pointerEvents: 'none'
+    }}>
+      {bubbles.map((b) => (
+        <div
+          key={b.id}
+          className="floating-bubble-3d"
           style={{
-            width: b.size,
-            height: b.size,
+            width: `${b.size}px`,
+            height: `${b.size}px`,
             left: `${b.left}%`,
             animationDuration: `${b.duration}s`,
             animationDelay: `${b.delay}s`,
+            opacity: b.opacity
+          }}
+          onClick={(e) => {
+            e.currentTarget.style.transform = 'scale(1.5)';
+            e.currentTarget.style.opacity = '0';
           }}
         />
       ))}

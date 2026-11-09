@@ -1,51 +1,82 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import * as authService from "../services/authService.js";
-import { getToken, setToken } from "../services/api.js";
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import axios from 'axios';
 
-const AuthContext = createContext(null);
+const AuthContext = createContext();
 
-export function AuthProvider({ children }) {
+const API_URL = 'http://localhost:5001/api';
+
+export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  // true while we check a saved token when the page first opens
-  const [loading, setLoading] = useState(Boolean(getToken()));
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!getToken()) return;
-
-    authService
-      .fetchMe()
-      .then(setUser)
-      .catch((err) => {
-        // expired or invalid token: forget it. (Network errors keep the token.)
-        if (err.status === 401) setToken(null);
-      })
-      .finally(() => setLoading(false));
+    const token = localStorage.getItem('token');
+    if (token) {
+      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      fetchCurrentUser();
+    } else {
+      setLoading(false);
+    }
   }, []);
 
-  async function login(credentials) {
-    const u = await authService.login(credentials);
-    setUser(u);
-    return u;
-  }
+  const fetchCurrentUser = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/auth/me`);
+      setUser(res.data.user);
+    } catch (err) {
+      console.error('Session expired or invalid token:', err);
+      logout(); // Invalid token hone par cleanly logout kar dega
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  async function register(details) {
-    const u = await authService.register(details);
-    setUser(u);
-    return u;
-  }
+  const login = async (email, password) => {
+    const payload = {
+      email: String(email || '').trim(),
+      password: String(password || '')
+    };
 
-  async function logout() {
-    await authService.logout();
+    const res = await axios.post(`${API_URL}/auth/login`, payload);
+    
+    if (res.data.token) {
+      localStorage.setItem('token', res.data.token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`;
+      setUser(res.data.user);
+    }
+    return res.data;
+  };
+
+  const register = async (name, email, password, confirmPassword) => {
+    const payload = {
+      name: String(name || '').trim(),
+      email: String(email || '').trim(),
+      password: String(password || ''),
+      confirmPassword: String(confirmPassword || '')
+    };
+
+    const res = await axios.post(`${API_URL}/auth/register`, payload);
+
+    if (res.data.token) {
+      localStorage.setItem('token', res.data.token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`;
+      setUser(res.data.user);
+    }
+    return res.data;
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    delete axios.defaults.headers.common['Authorization'];
     setUser(null);
-  }
+    setLoading(false);
+  };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, setUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
-export function useAuth() {
-  return useContext(AuthContext);
-}
+export const useAuth = () => useContext(AuthContext);

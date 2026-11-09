@@ -1,778 +1,1440 @@
-import { useEffect, useRef, useState } from "react";
-import { BOARD_WIDTH } from "../game/constants.js";
-import { boardFromLayout, cellToPixel } from "../game/hexGrid.js";
-import { traceShot } from "../game/collision.js";
-import { resolveShot } from "../game/shotResolver.js";
-import { findBestShot } from "../game/hint.js";
-import { makeRng } from "../game/rng.js";
-import { pickColor } from "../game/bubbleQueue.js";
-import { calculateShotScore, calculateStars } from "../game/scoreManager.js";
-import {
-  isObjectiveComplete,
-  objectiveProgress,
-  countBubbles,
-} from "../game/objectiveManager.js";
-import {
-  createEffects,
-  addPop,
-  addFall,
-  updateEffects,
-  hasActiveEffects,
-  drawEffects,
-} from "../game/effects.js";
-import { LEVELS } from "../data/levels.js";
-import {
-  sfx,
-  getAudioSettings,
-  setSoundEnabled,
-  setMusicEnabled,
-  startMusic,
-  stopMusic,
-} from "../game/audio.js";
-import {
-  drawBoard,
-  drawBubble,
-  drawTrajectory,
-  drawLauncher,
-  drawHint,
-} from "../game/renderer.js";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
-// NOTE: the server uses the same numbers to replay games
-// (server/src/services/validateSession.js). Change them in both places.
-const CANVAS_HEIGHT = 600;
-const LAUNCHER_X = BOARD_WIDTH / 2;
-const LAUNCHER_Y = CANVAS_HEIGHT - 60;
-const SHOT_SPEED = 16; // pixels per frame
-const HINT_SHOW_MS = 3500; // how long the golden hint line stays visible
-
-// Launcher can't aim fully sideways: keep between 15 and 165 degrees
-const MIN_ANGLE = (15 * Math.PI) / 180;
-const MAX_ANGLE = Math.PI - MIN_ANGLE;
-
-// Every level gets these unless it defines its own `boosters: { bomb, rainbow }`
-const DEFAULT_BOOSTERS = { bomb: 2, rainbow: 2 };
-const HINTS_PER_LEVEL = 3;
-
-const BOOSTERS = [
-  { id: "bomb", icon: "💣", name: "Bomb", key: "1", info: "pops every bubble around where it lands" },
-  { id: "rainbow", icon: "🌈", name: "Rainbow", key: "2", info: "matches with any colour" },
+const W = 360;
+const H = 520;
+const R = 16;
+const STEP_X = 34;
+const STEP_Y = Math.sqrt(3) * R;
+const COLS = 10;
+const BOARD_ROWS = 13;
+const START_ROWS = 6;
+const COLORS = [
+  "#38bdf8",
+  "#fbbf24",
+  "#ec4899",
+  "#10b981",
+  "#a855f7",
+  "#f97316",
 ];
 
-// Swap current ↔ next bubble (free, unlimited — classic bubble-shooter feature)
-function swapBubbles(g) {
-  if (g.status !== "READY" || g.paused || g.armed) return false;
-  const tmp = g.current;
-  g.current = g.next;
-  g.next = tmp;
-  return true;
+const randomColor = () =>
+  COLORS[Math.floor(Math.random() * COLORS.length)];
+
+const center = (r, c) => ({
+  x: 28 + c * STEP_X + (r % 2 ? R : 0),
+  y: 24 + R + r * STEP_Y,
+});
+
+function createBoard(level = 1) {
+  const filledRows = Math.min(
+    START_ROWS + Math.floor((level - 1) / 3),
+    10
+  );
+
+  return Array.from({ length: BOARD_ROWS }, (_, r) =>
+    Array.from({ length: COLS }, (_, c) => ({
+      ...center(r, c),
+      color: randomColor(),
+      active: r < filledRows,
+    }))
+  );
 }
 
-// Fresh game state for a level. `seed` makes the bubble queue repeatable,
-// so the server can replay exactly this game.
-function createGame(level, seed) {
-  const board = boardFromLayout(level.layout);
-  const rng = makeRng(seed);
+// Hexagonal grid neighbours
+function getNeighbors(r, c, rows, cols) {
+  const offsets =
+    r % 2 === 0
+      ? [
+          [0, -1],
+          [0, 1],
+          [-1, -1],
+          [-1, 0],
+          [1, -1],
+          [1, 0],
+        ]
+      : [
+          [0, -1],
+          [0, 1],
+          [-1, 0],
+          [-1, 1],
+          [1, 0],
+          [1, 1],
+        ];
+
+  return offsets
+    .map(([dr, dc]) => [r + dr, c + dc])
+    .filter(
+      ([nr, nc]) =>
+        nr >= 0 &&
+        nr < rows &&
+        nc >= 0 &&
+        nc < cols
+    );
+}
+
+// Find connected bubbles of the same colour
+function getCluster(board, startR, startC) {
+  const start = board[startR]?.[startC];
+
+  if (!start || !start.active) return [];
+
+  const rows = board.length;
+  const cols = board[0].length;
+
+  const queue = [[startR, startC]];
+  const visited = new Set([`${startR},${startC}`]);
+  const result = [];
+
+  while (queue.length) {
+    const [r, c] = queue.shift();
+    result.push([r, c]);
+
+    for (const [nr, nc] of getNeighbors(r, c, rows, cols)) {
+      const key = `${nr},${nc}`;
+      const bubble = board[nr][nc];
+
+      if (
+        !visited.has(key) &&
+        bubble.active &&
+        bubble.color === start.color
+      ) {
+        visited.add(key);
+        queue.push([nr, nc]);
+      }
+    }
+  }
+
+  return result;
+}
+
+// Find bubbles that are no longer connected to the ceiling
+function getFloatingBubbles(board) {
+  const rows = board.length;
+  const cols = board[0].length;
+
+  const connected = new Set();
+  const queue = [];
+
+  for (let c = 0; c < cols; c++) {
+    if (board[0][c].active) {
+      queue.push([0, c]);
+      connected.add(`0,${c}`);
+    }
+  }
+
+  while (queue.length) {
+    const [r, c] = queue.shift();
+
+    for (const [nr, nc] of getNeighbors(r, c, rows, cols)) {
+      const key = `${nr},${nc}`;
+
+      if (
+        board[nr][nc].active &&
+        !connected.has(key)
+      ) {
+        connected.add(key);
+        queue.push([nr, nc]);
+      }
+    }
+  }
+
+  const floating = [];
+
+  board.forEach((row, r) => {
+    row.forEach((bubble, c) => {
+      if (
+        bubble.active &&
+        !connected.has(`${r},${c}`)
+      ) {
+        floating.push([r, c]);
+      }
+    });
+  });
+
+  return floating;
+}
+
+function createGame(level = 1) {
   return {
-    board,
-    rng,
-    angle: Math.PI / 2,
-    current: pickColor(board, rng),
-    next: pickColor(board, rng),
-    held: null, // normal bubble that is waiting while a booster is armed
-    armed: null, // null | "bomb" | "rainbow"
-    boosters: { ...DEFAULT_BOOSTERS, ...(level.boosters || {}) },
-    hints: HINTS_PER_LEVEL,
-    hint: null, // { path, cell } while a hint is on screen
-    shotLog: [], // every shot fired: { angle, color, r, c } (sent to the server)
-    status: "READY", // READY | SHOOTING | RESOLVING | WON | LOST
-    paused: false, // pause freezes shooting, animations and music
+    board: createBoard(level),
+    rows: BOARD_ROWS,
+    cols: COLS,
+    level,
+    angle: -Math.PI / 2,
+    current: randomColor(),
+    next: randomColor(),
     score: 0,
-    shots: level.shots,
-    combo: 0, // consecutive successful shots
+    shots: 35,
+    combo: 0,
     bestCombo: 0,
-    floatingDropped: 0, // bubbles that fell (for "Drop" levels)
-    effects: createEffects(),
+    hints: 3,
+    boosters: {
+      bomb: 2,
+      rainbow: 2,
+      fire: 1,
+    },
+    armed: null,
+    heldColor: null,
+    status: "READY",
+    paused: false,
+    hintActive: false,
   };
 }
 
-// Everything the HUD needs, copied out of the game state
-function snapshot(g, outcome = null, stars = 0) {
-  return {
-    score: g.score,
-    shots: g.shots,
-    combo: g.combo,
-    bestCombo: g.bestCombo,
-    floatingDropped: g.floatingDropped,
-    boosters: { ...g.boosters },
-    hints: g.hints,
-    armed: g.armed,
-    outcome,
-    stars,
-  };
-}
+function drawBubble(ctx, x, y, color, radius = R) {
+  const gradient = ctx.createRadialGradient(
+    x - 5,
+    y - 6,
+    2,
+    x,
+    y,
+    radius
+  );
 
-const COMBO_CSS = `
-@keyframes comboPop {
-  0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
-  25%  { transform: translate(-50%, -50%) scale(1.25); opacity: 1; }
-  70%  { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-  100% { transform: translate(-50%, -80%) scale(1); opacity: 0; }
+  gradient.addColorStop(0, "#ffffff");
+  gradient.addColorStop(0.18, color);
+  gradient.addColorStop(1, color);
+
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 8;
+
+  ctx.beginPath();
+  ctx.arc(x, y, radius - 1, 0, Math.PI * 2);
+  ctx.fillStyle = gradient;
+  ctx.fill();
+
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.arc(x - 5, y - 6, 3, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255,255,255,.65)";
+  ctx.fill();
 }
-`;
 
 export default function GameCanvas({
-  level = LEVELS[0],
-  seed = 1, // from the server (POST /api/games/start)
-  saveStatus = null, // { state: "saving" | "saved" | "error", message, canRetry }
-  onFinish = null, // called when the level ends: onFinish({ outcome, shots, score })
-  onRetrySave = null, // "Try saving again" button
-  onRestart = null, // asks the page for a NEW game session
-  onNext = null, // called when player presses "Next Level"
-  onExit = null, // called when player presses "Levels"
+  levelId = 1,
+  onExit = null,
+  onLevelsClick = null,
 }) {
   const canvasRef = useRef(null);
   const gameRef = useRef(null);
-  const rafRef = useRef(null);
-  const hintTimerRef = useRef(null);
-  const actionsRef = useRef({}); // always holds the latest functions (for keyboard)
+  const animationRef = useRef(null);
 
-  if (!gameRef.current) gameRef.current = createGame(level, seed);
-
-  // React state only for the HUD / overlay (canvas itself is drawn from the ref)
-  const [hud, setHud] = useState(() => snapshot(gameRef.current));
-  const [comboFlash, setComboFlash] = useState(null); // { combo, id }
+  const [hud, setHud] = useState(null);
   const [paused, setPaused] = useState(false);
-  const [hintText, setHintText] = useState("");
+  const [message, setMessage] = useState("");
+  const [settings, setSettings] = useState(false);
+  const [sound, setSound] = useState(true);
+  const [music, setMusic] = useState(true);
+  const [bestScore, setBestScore] = useState(0);
 
-  const [soundOn, setSoundOn] = useState(getAudioSettings().sound);
-  const [musicOn, setMusicOn] = useState(getAudioSettings().music);
-
-  const saving = saveStatus?.state === "saving";
-  const nextReady = !saveStatus || saveStatus.state === "saved";
-
-  function toggleSound() {
-    const next = !soundOn;
-    setSoundEnabled(next);
-    setSoundOn(next);
-    if (next) sfx.click(); // confirmation beep when turning ON
+  if (!gameRef.current) {
+    gameRef.current = createGame(levelId);
   }
 
-  function toggleMusic() {
-    const next = !musicOn;
-    setMusicEnabled(next); // starts or stops the music immediately
-    setMusicOn(next);
-  }
+  const game = gameRef.current;
 
-  function render(flying) {
-    const g = gameRef.current;
-    const ctx = canvasRef.current.getContext("2d");
-    ctx.clearRect(0, 0, BOARD_WIDTH, CANVAS_HEIGHT);
-    drawBoard(ctx, g.board);
-    drawEffects(ctx, g.effects);
-
-    if (g.status === "READY") {
-      const { path } = traceShot(g.board, LAUNCHER_X, LAUNCHER_Y, g.angle);
-      drawTrajectory(ctx, path);
-      if (g.hint) drawHint(ctx, g.hint.path, g.hint.cell);
-    }
-    drawLauncher(ctx, LAUNCHER_X, LAUNCHER_Y, g.angle, g.current, g.next);
-    if (flying) drawBubble(ctx, flying.x, flying.y, flying.color);
-  }
-
-  useEffect(() => {
-    render();
-
-    // Browsers only allow audio after a click, so start music on first click too
-    startMusic();
-    const kick = () => {
-      if (!gameRef.current.paused) startMusic();
-    };
-    window.addEventListener("pointerdown", kick, { once: true });
-
-    // Keyboard: Esc = pause, R = restart, Space = shoot, 1 = Bomb, 2 = Rainbow, H = hint, S = swap
-    const onKey = (e) => {
-      if (e.repeat) return;
-      const a = actionsRef.current;
-      if (e.key === "Escape") {
-        a.togglePause();
-      } else if (e.key === "r" || e.key === "R") {
-        a.restart();
-      } else if (e.key === "h" || e.key === "H") {
-        a.showHint();
-      } else if (e.key === "1") {
-        a.toggleBooster("bomb");
-      } else if (e.key === "2") {
-        a.toggleBooster("rainbow");
-      } else if (e.key === "s" || e.key === "S") {
-        a.doSwap();
-      } else if (e.key === " " && e.target.tagName !== "BUTTON") {
-        e.preventDefault();
-        a.shoot();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      clearTimeout(hintTimerRef.current);
-      window.removeEventListener("pointerdown", kick);
-      window.removeEventListener("keydown", onKey);
-      stopMusic();
-    };
-  }, []);
-
-  function clearHint() {
-    clearTimeout(hintTimerRef.current);
-    gameRef.current.hint = null;
-    setHintText("");
-  }
-
-  function togglePause() {
-    const g = gameRef.current;
-    if (g.status === "WON" || g.status === "LOST") return; // nothing to pause
-    g.paused = !g.paused;
-    setPaused(g.paused);
-    if (g.paused) {
-      stopMusic();
-    } else {
-      startMusic(); // only plays if Music is ON in settings
-    }
-    render();
-  }
-
-  function restart() {
-    if (saving) return; // wait until the finished game is saved
-    sfx.click();
-
-    // normal case: the page gets a NEW session (new seed) and rebuilds this game
-    if (onRestart) {
-      onRestart();
-      return;
-    }
-
-    // fallback when no page is controlling the game
-    cancelAnimationFrame(rafRef.current);
-    clearTimeout(hintTimerRef.current);
-    gameRef.current = createGame(level, seed);
-    setPaused(false);
-    setHintText("");
-    setHud(snapshot(gameRef.current));
-    setComboFlash(null);
-    startMusic();
-    render();
-  }
-
-  // Shows the best shot for the bubble currently in the launcher
-  function showHint() {
+  const sync = useCallback((outcome = null) => {
     const g = gameRef.current;
 
-    // validation: only between shots, never when paused or after the level ended
-    if (g.status !== "READY" || g.paused) return;
-    if (g.hints <= 0) {
-      setHintText("No hints left on this level");
-      return;
-    }
-
-    const best = findBestShot(
-      g.board,
-      LAUNCHER_X,
-      LAUNCHER_Y,
-      g.current,
-      MIN_ANGLE,
-      MAX_ANGLE
-    );
-
-    sfx.click();
-
-    if (!best) {
-      // no match is possible with this bubble: nothing is spent
-      setHintText("💡 No match possible with this bubble. Try setting up a shot.");
-      return;
-    }
-
-    g.hints -= 1;
-    g.hint = { path: best.path, cell: best.cell };
-
-    let text = `💡 Hint: pops ${best.popped} bubble${best.popped === 1 ? "" : "s"}`;
-    if (best.floating > 0) text += ` and drops ${best.floating}`;
-    if (best.path.length > 2) text += " (bank shot off the wall!)";
-    text += ". Aim along the golden line.";
-    setHintText(text);
-
-    setHud(snapshot(g));
-    render();
-
-    clearTimeout(hintTimerRef.current);
-    hintTimerRef.current = setTimeout(() => {
-      clearHint();
-      if (canvasRef.current) render();
-    }, HINT_SHOW_MS);
-  }
-
-  // Arm / disarm a booster. It replaces the current bubble until you shoot.
-  function toggleBooster(type) {
-    const g = gameRef.current;
-
-    // validation: only between shots, never when paused or after the level ended
-    if (g.status !== "READY" || g.paused) return;
-    if (countBubbles(g.board) === 0) return; // nothing to hit
-
-    clearHint(); // an old hint was for a different bubble
-
-    if (g.armed === type) {
-      // tapping again cancels: the normal bubble comes back, nothing is spent
-      g.current = g.held;
-      g.held = null;
-      g.armed = null;
-    } else {
-      if (g.boosters[type] <= 0) return; // none left
-      if (g.armed) {
-        // switching from the other booster: bring the normal bubble back first
-        g.current = g.held;
-        g.held = null;
-        g.armed = null;
-      }
-      g.held = g.current;
-      g.current = type;
-      g.armed = type;
-    }
-
-    sfx.click();
-    setHud(snapshot(g));
-    render();
-  }
-
-  // Swap current bubble with the next bubble (free, unlimited)
-  function doSwap() {
-    const g = gameRef.current;
-    if (!swapBubbles(g)) return;
-    clearHint();
-    sfx.click();
-    setHud(snapshot(g));
-    render();
-  }
-
-  function updateAim(e) {
-    const g = gameRef.current;
-    if (g.status !== "READY" || g.paused) return;
-    const rect = canvasRef.current.getBoundingClientRect();
-    const mx = ((e.clientX - rect.left) * BOARD_WIDTH) / rect.width;
-    const my = ((e.clientY - rect.top) * CANVAS_HEIGHT) / rect.height;
-
-    let angle = Math.atan2(LAUNCHER_Y - my, mx - LAUNCHER_X);
-    g.angle = Math.max(MIN_ANGLE, Math.min(MAX_ANGLE, angle));
-    render();
-  }
-
-  // Runs after the bubble has attached: starts effects, then finishes the turn
-  function resolveTurn(cell, color) {
-    const g = gameRef.current;
-    const result = resolveShot(g.board, cell.r, cell.c, color);
-
-    // combo: every match in a row raises it, a miss resets it
-    if (result.matched) {
-      g.combo += 1;
-      g.bestCombo = Math.max(g.bestCombo, g.combo);
-    } else {
-      g.combo = 0;
-    }
-
-    // same function the server uses (includes the +100 for every chick rescued)
-    g.score += calculateShotScore(result, Math.max(g.combo, 1));
-    g.floatingDropped += result.floating.length;
-    g.shots -= 1;
-
-    // sounds (pitch goes higher with bigger groups and higher combos)
-    if (result.special === "bomb") sfx.pop(10);
-    else if (result.matched) sfx.pop(result.popped.length + g.combo - 1);
-    else sfx.stick();
-    if (result.floating.length > 0) sfx.fall();
-
-    if (g.combo >= 2) setComboFlash({ combo: g.combo, id: Date.now() });
-
-    // start animations
-    for (const b of result.poppedBubbles) {
-      const { x, y } = cellToPixel(b.r, b.c);
-      addPop(g.effects, x, y, b.color);
-    }
-    for (const b of result.floatingBubbles) {
-      const { x, y } = cellToPixel(b.r, b.c);
-      addFall(g.effects, x, y, b.color);
-    }
-
-    // decide the result now, but show it after the animations finish.
-    // The level is won the moment its OBJECTIVE is complete.
-    let outcome = null;
-    let stars = 0;
-    const objectiveDone = isObjectiveComplete(level.objective, {
-      board: g.board,
+    setHud({
       score: g.score,
-      floatingDropped: g.floatingDropped,
+      shots: g.shots,
+      combo: g.combo,
       bestCombo: g.bestCombo,
+      current: g.current,
+      next: g.next,
+      hints: g.hints,
+      boosters: { ...g.boosters },
+      armed: g.armed,
+      level: g.level,
+      outcome,
     });
 
-    if (objectiveDone) {
-      outcome = "WON";
-      // a win always gives at least 1 star
-      stars = Math.max(1, calculateStars(g.score, level.starThresholds));
-    } else if (countBubbles(g.board) === 0 || g.shots <= 0) {
-      outcome = "LOST"; // no bubbles left to work with, or out of shots
-    }
+    setBestScore((old) => Math.max(old, g.score));
+  }, []);
 
-    g.status = "RESOLVING"; // blocks shooting while animations play
-    setHud(snapshot(g));
-
-    const finish = () => {
-      g.status = outcome || "READY";
-      if (outcome === "WON") sfx.win();
-      if (outcome === "LOST") sfx.lose();
-      setHud(snapshot(g, outcome, stars));
-      render();
-      // send the shots to the server, which replays and saves the verified result
-      if (outcome && onFinish) {
-        onFinish({ outcome, shots: g.shotLog, score: g.score });
-      }
-    };
-
-    const animate = () => {
-      if (g.paused) {
-        // frozen: keep waiting, do not move any animation forward
-        rafRef.current = requestAnimationFrame(animate);
-        return;
-      }
-      updateEffects(g.effects);
-      render();
-      if (hasActiveEffects(g.effects)) {
-        rafRef.current = requestAnimationFrame(animate);
-      } else {
-        finish();
-      }
-    };
-    animate();
-  }
-
-  function shoot() {
+  // Draw the complete game
+  const render = useCallback((flying = null) => {
     const g = gameRef.current;
-    if (g.status !== "READY" || g.paused) return; // no double shooting, none while paused
+    const canvas = canvasRef.current;
 
-    const { path, cell } = traceShot(g.board, LAUNCHER_X, LAUNCHER_Y, g.angle);
-    if (!cell) return;
+    if (!canvas || !g) return;
 
-    clearHint();
-    g.status = "SHOOTING";
-    sfx.shoot();
-    const color = g.current;
+    const ctx = canvas.getContext("2d");
 
-    // remember this shot: the server will replay it
-    g.shotLog.push({ angle: g.angle, color, r: cell.r, c: cell.c });
+    ctx.clearRect(0, 0, W, H);
 
-    if (g.armed) {
-      // booster shot: spend one booster, then the held normal bubble comes back
-      g.boosters[g.armed] -= 1;
-      g.armed = null;
-      g.current = g.held;
-      g.held = null;
-    } else {
-      g.current = g.next;
-      g.next = pickColor(g.board, g.rng);
+    // Background stars
+    ctx.fillStyle = "rgba(255,255,255,.35)";
+
+    for (let i = 0; i < 25; i++) {
+      const x = (i * 83 + 19) % W;
+      const y = (i * 47 + 13) % H;
+
+      ctx.fillRect(x, y, 1.5, 1.5);
     }
-    setHud(snapshot(g));
 
-    let seg = 0;
-    let pos = { x: path[0].x, y: path[0].y };
+    // Draw bubbles
+    g.board.forEach((row) => {
+      row.forEach((bubble) => {
+        if (bubble.active) {
+          drawBubble(
+            ctx,
+            bubble.x,
+            bubble.y,
+            bubble.color
+          );
+        }
+      });
+    });
 
-    const step = () => {
-      if (g.paused) {
-        // frozen mid-flight: bubble stays where it is
-        rafRef.current = requestAnimationFrame(step);
-        return;
+    // Aim line
+    let x = W / 2;
+    let y = H - 48;
+
+    let vx = Math.cos(g.angle) * 10;
+    let vy = Math.sin(g.angle) * 10;
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+
+    for (let i = 0; i < 35; i++) {
+      x += vx;
+      y += vy;
+
+      if (x < R || x > W - R) {
+        vx *= -1;
       }
 
-      // move SHOT_SPEED pixels along the path (it may turn at bounce points)
-      let remaining = SHOT_SPEED;
-      while (remaining > 0 && seg < path.length - 1) {
-        const target = path[seg + 1];
-        const d = Math.hypot(target.x - pos.x, target.y - pos.y);
-        if (d <= remaining) {
-          pos = { x: target.x, y: target.y };
-          remaining -= d;
-          seg++;
-        } else {
-          pos = {
-            x: pos.x + ((target.x - pos.x) * remaining) / d,
-            y: pos.y + ((target.y - pos.y) * remaining) / d,
-          };
-          remaining = 0;
+      if (y < 10) break;
+
+      ctx.lineTo(x, y);
+    }
+
+    ctx.strokeStyle = g.hintActive
+      ? "#fbbf24"
+      : "rgba(255,255,255,.4)";
+
+    ctx.lineWidth = g.hintActive ? 3 : 1.5;
+    ctx.setLineDash([5, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Launcher
+    ctx.save();
+
+    ctx.translate(W / 2, H - 48);
+    ctx.rotate(g.angle);
+
+    ctx.fillStyle = "#7dd3fc";
+    ctx.fillRect(0, -7, 40, 14);
+
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(W / 2, H - 48, 21, 0, Math.PI * 2);
+
+    ctx.fillStyle = "#0f172a";
+    ctx.fill();
+
+    ctx.strokeStyle = g.armed
+      ? "#fbbf24"
+      : "#38bdf8";
+
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    const launcherColor =
+      g.armed === "bomb"
+        ? "#ef4444"
+        : g.armed === "rainbow"
+        ? "#a855f7"
+        : g.armed === "fire"
+        ? "#f97316"
+        : g.current;
+
+    drawBubble(
+      ctx,
+      W / 2,
+      H - 48,
+      launcherColor,
+      15
+    );
+
+    // Flying bubble
+    if (flying) {
+      drawBubble(
+        ctx,
+        flying.x,
+        flying.y,
+        flying.color,
+        15
+      );
+    }
+
+    // Danger line
+    ctx.beginPath();
+    ctx.moveTo(0, H - 115);
+    ctx.lineTo(W, H - 115);
+
+    ctx.strokeStyle = "rgba(248,113,113,.5)";
+    ctx.setLineDash([4, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }, []);
+
+  // Check win or lose
+  const checkGame = useCallback(() => {
+    const g = gameRef.current;
+
+    const remaining = g.board.some((row) =>
+      row.some((bubble) => bubble.active)
+    );
+
+    if (!remaining) {
+      g.status = "WON";
+      sync("WON");
+      render();
+      return;
+    }
+
+    const active = g.board
+      .flat()
+      .filter((bubble) => bubble.active);
+
+    const lowest = active.reduce(
+      (max, bubble) => Math.max(max, bubble.y),
+      0
+    );
+
+    if (g.shots <= 0 || lowest >= H - 105) {
+      g.status = "LOST";
+      sync("LOST");
+      render();
+      return;
+    }
+
+    g.status = "READY";
+
+    sync();
+    render();
+  }, [render, sync]);
+
+  // Restart
+  const restart = useCallback(
+    (level = gameRef.current.level) => {
+      cancelAnimationFrame(animationRef.current);
+
+      gameRef.current = createGame(level);
+
+      setPaused(false);
+      setMessage("");
+      setSettings(false);
+
+      sync();
+      render();
+    },
+    [render, sync]
+  );
+
+  const nextLevel = useCallback(() => {
+    restart(gameRef.current.level + 1);
+  }, [restart]);
+
+  // Pause
+  const togglePause = useCallback(() => {
+    const g = gameRef.current;
+
+    if (g.status !== "READY") return;
+
+    g.paused = !g.paused;
+
+    setPaused(g.paused);
+    render();
+  }, [render]);
+
+  // Aim
+  const setAim = useCallback(
+    (e) => {
+      const g = gameRef.current;
+
+      if (g.status !== "READY" || g.paused) return;
+
+      const rect = canvasRef.current.getBoundingClientRect();
+
+      const mx =
+        ((e.clientX - rect.left) / rect.width) * W;
+
+      const my =
+        ((e.clientY - rect.top) / rect.height) * H;
+
+      let angle = Math.atan2(
+        my - (H - 48),
+        mx - W / 2
+      );
+
+      angle = Math.max(
+        -Math.PI + 0.12,
+        Math.min(-0.12, angle)
+      );
+
+      g.angle = angle;
+
+      render();
+    },
+    [render]
+  );
+
+  // Remove matched bubbles or use booster
+  const popBubbles = useCallback(
+    (r, c, special = null, shotColor = null) => {
+      const g = gameRef.current;
+      const board = g.board;
+
+      let popped = [];
+
+      if (special === "bomb") {
+        for (
+          let rr = Math.max(0, r - 1);
+          rr <= Math.min(g.rows - 1, r + 1);
+          rr++
+        ) {
+          for (
+            let cc = Math.max(0, c - 1);
+            cc <= Math.min(g.cols - 1, c + 1);
+            cc++
+          ) {
+            if (board[rr][cc].active) {
+              popped.push([rr, cc]);
+            }
+          }
+        }
+      } else if (special === "rainbow") {
+        const targetColor = board[r][c].color;
+
+        board.forEach((row, rr) => {
+          row.forEach((bubble, cc) => {
+            if (
+              bubble.active &&
+              bubble.color === targetColor
+            ) {
+              popped.push([rr, cc]);
+            }
+          });
+        });
+      } else if (special === "fire") {
+        board.forEach((row, rr) => {
+          row.forEach((bubble, cc) => {
+            if (
+              bubble.active &&
+              bubble.color === shotColor
+            ) {
+              popped.push([rr, cc]);
+            }
+          });
+        });
+      } else {
+        popped = getCluster(board, r, c);
+
+        // Regular shot needs at least 3 connected bubbles
+        if (popped.length < 3) {
+          g.combo = 0;
+          g.misses++;
+          sync();
+          render();
+          return false;
         }
       }
 
-      if (seg >= path.length - 1) {
-        resolveTurn(cell, color);
+      // Remove popped bubbles
+      popped.forEach(([rr, cc]) => {
+        board[rr][cc].active = false;
+      });
+
+      // Remove unsupported bubbles
+      const floating = getFloatingBubbles(board);
+
+      floating.forEach(([rr, cc]) => {
+        board[rr][cc].active = false;
+      });
+
+      const total = popped.length + floating.length;
+
+      g.score +=
+        popped.length * 10 +
+        floating.length * 20;
+
+      if (total > 0) {
+        g.combo++;
+        g.bestCombo = Math.max(
+          g.bestCombo,
+          g.combo
+        );
+
+        setMessage(
+          floating.length > 0
+            ? `🔥 ${total} BUBBLES POPPED!`
+            : `+${popped.length * 10} POINTS!`
+        );
+      }
+
+      sync();
+      render();
+
+      return true;
+    },
+    [render, sync]
+  );
+
+  // Find nearest empty neighbouring cell
+  const findEmptyNeighbor = useCallback((r, c) => {
+    const g = gameRef.current;
+
+    const candidates = getNeighbors(
+      r,
+      c,
+      g.rows,
+      g.cols
+    )
+      .filter(([rr, cc]) => !g.board[rr][cc].active)
+      .map(([rr, cc]) => {
+        const pos = center(rr, cc);
+
+        return {
+          r: rr,
+          c: cc,
+          distance: Math.hypot(
+            pos.x - g.board[r][c].x,
+            pos.y - g.board[r][c].y
+          ),
+        };
+      })
+      .sort((a, b) => a.distance - b.distance);
+
+    return candidates[0] || null;
+  }, []);
+
+  // Attach a bubble to the board
+  const attachBubble = useCallback(
+    (r, c, color, special = null) => {
+      const g = gameRef.current;
+
+      if (special) {
+        popBubbles(r, c, special, color);
         return;
       }
 
-      render({ x: pos.x, y: pos.y, color });
-      rafRef.current = requestAnimationFrame(step);
+      const target = findEmptyNeighbor(r, c);
+
+      if (!target) {
+        checkGame();
+        return;
+      }
+
+      const pos = center(target.r, target.c);
+
+      g.board[target.r][target.c] = {
+        ...pos,
+        color,
+        active: true,
+      };
+
+      // IMPORTANT: Match check happens at the newly attached bubble
+      popBubbles(
+        target.r,
+        target.c,
+        null,
+        color
+      );
+
+      checkGame();
+    },
+    [checkGame, findEmptyNeighbor, popBubbles]
+  );
+
+  // Shoot bubble
+  const shoot = useCallback(() => {
+    const g = gameRef.current;
+
+    if (
+      g.status !== "READY" ||
+      g.paused
+    ) {
+      return;
+    }
+
+    const color = g.current;
+    const special = g.armed;
+
+    if (special && g.boosters[special] <= 0) {
+      return;
+    }
+
+    if (special) {
+      g.boosters[special]--;
+      g.armed = null;
+      g.heldColor = null;
+    }
+
+    g.shots--;
+
+    g.current = g.next;
+    g.next = randomColor();
+
+    const speed = 10;
+
+    let x = W / 2;
+    let y = H - 48;
+
+    let vx = Math.cos(g.angle) * speed;
+    let vy = Math.sin(g.angle) * speed;
+
+    const tick = () => {
+      if (
+        g.paused ||
+        g.status !== "READY"
+      ) {
+        return;
+      }
+
+      x += vx;
+      y += vy;
+
+      // Wall bounce
+      if (x < R) {
+        x = R;
+        vx = Math.abs(vx);
+      }
+
+      if (x > W - R) {
+        x = W - R;
+        vx = -Math.abs(vx);
+      }
+
+      let hit = null;
+
+      // Collision detection
+      for (let r = 0; r < g.rows && !hit; r++) {
+        for (let c = 0; c < g.cols; c++) {
+          const bubble = g.board[r][c];
+
+          if (!bubble.active) continue;
+
+          const distance = Math.hypot(
+            x - bubble.x,
+            y - bubble.y
+          );
+
+          if (distance < R * 2 - 2) {
+            hit = [r, c];
+            break;
+          }
+        }
+      }
+
+      // Hit another bubble
+      if (hit) {
+        attachBubble(
+          hit[0],
+          hit[1],
+          color,
+          special
+        );
+
+        sync();
+        return;
+      }
+
+      // Hit ceiling
+      if (y <= R + 5) {
+        const targetC = Math.max(
+          0,
+          Math.min(
+            COLS - 1,
+            Math.round(
+              (x - 28) / STEP_X
+            )
+          )
+        );
+
+        const emptyTop = g.board[0]
+          .map((bubble, c) =>
+            !bubble.active ? c : null
+          )
+          .filter((c) => c !== null);
+
+        if (emptyTop.length) {
+          const c = emptyTop.sort(
+            (a, b) =>
+              Math.abs(a - targetC) -
+              Math.abs(b - targetC)
+          )[0];
+
+          g.board[0][c] = {
+            ...center(0, c),
+            color,
+            active: true,
+          };
+
+          popBubbles(0, c, null, color);
+        }
+
+        checkGame();
+        return;
+      }
+
+      // Keep drawing flying bubble
+      render({
+        x,
+        y,
+        color:
+          special === "bomb"
+            ? "#ef4444"
+            : special === "rainbow"
+            ? "#a855f7"
+            : color,
+      });
+
+      animationRef.current =
+        requestAnimationFrame(tick);
     };
 
-    rafRef.current = requestAnimationFrame(step);
-  }
+    sync();
 
-  // keep the keyboard handler pointing at the newest functions
-  actionsRef.current = { togglePause, restart, shoot, toggleBooster, showHint, doSwap };
+    animationRef.current =
+      requestAnimationFrame(tick);
+  }, [
+    attachBubble,
+    checkGame,
+    popBubbles,
+    render,
+    sync,
+  ]);
 
-  const armedInfo = BOOSTERS.find((b) => b.id === hud.armed);
-  const barDisabled = paused || !!hud.outcome;
+  // Booster selection
+  const toggleBooster = useCallback(
+    (type) => {
+      const g = gameRef.current;
 
-  // e.g. "🐣 Rescue 3 chicks · 1/3 rescued"
-  const objectiveText = objectiveProgress(level.objective, {
-    board: gameRef.current.board,
-    score: hud.score,
-    floatingDropped: hud.floatingDropped,
-    bestCombo: hud.bestCombo,
-  });
+      if (
+        g.status !== "READY" ||
+        g.paused
+      ) {
+        return;
+      }
 
-  let statusLine = "Swap bubbles (S) · Arm a booster · Hint (H) · Shoot";
-  if (hintText) statusLine = hintText;
-  else if (armedInfo)
-    statusLine = `${armedInfo.icon} ${armedInfo.name} ready: ${armedInfo.info}. Shoot! (tap again to cancel)`;
+      if (g.armed === type) {
+        g.armed = null;
+        g.current = g.heldColor || g.current;
+        g.heldColor = null;
+      } else if (g.boosters[type] > 0) {
+        if (!g.armed) {
+          g.heldColor = g.current;
+        }
+
+        g.armed = type;
+      }
+
+      sync();
+      render();
+    },
+    [render, sync]
+  );
+
+  // Swap current and next bubbles
+  const swap = useCallback(() => {
+    const g = gameRef.current;
+
+    if (
+      g.status !== "READY" ||
+      g.paused ||
+      g.armed
+    ) {
+      return;
+    }
+
+    [g.current, g.next] = [
+      g.next,
+      g.current,
+    ];
+
+    sync();
+    render();
+  }, [render, sync]);
+
+  // Hint
+  const hint = useCallback(() => {
+    const g = gameRef.current;
+
+    if (
+      g.status !== "READY" ||
+      g.paused ||
+      g.hints <= 0
+    ) {
+      return;
+    }
+
+    g.hints--;
+    g.hintActive = true;
+
+    setMessage("💡 Aim at matching bubbles!");
+
+    sync();
+    render();
+
+    window.setTimeout(() => {
+      g.hintActive = false;
+      render();
+    }, 2000);
+  }, [render, sync]);
+
+  // Keyboard controls
+  useEffect(() => {
+    sync();
+    render();
+
+    const onKeyDown = (e) => {
+      if (e.repeat) return;
+
+      if (e.key === "Escape") {
+        togglePause();
+      }
+
+      if (e.key.toLowerCase() === "r") {
+        restart();
+      }
+
+      if (e.key.toLowerCase() === "s") {
+        swap();
+      }
+
+      if (e.key.toLowerCase() === "h") {
+        hint();
+      }
+
+      if (e.key === " " && e.target.tagName !== "BUTTON") {
+        e.preventDefault();
+        shoot();
+      }
+
+      if (e.key === "1") toggleBooster("bomb");
+      if (e.key === "2") toggleBooster("rainbow");
+      if (e.key === "3") toggleBooster("fire");
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      cancelAnimationFrame(animationRef.current);
+      window.removeEventListener(
+        "keydown",
+        onKeyDown
+      );
+    };
+  }, [
+    hint,
+    render,
+    restart,
+    shoot,
+    swap,
+    sync,
+    toggleBooster,
+    togglePause,
+  ]);
+
+  const boosters = [
+    {
+      id: "bomb",
+      icon: "💣",
+      label: "Bomb",
+      key: "1",
+    },
+    {
+      id: "rainbow",
+      icon: "🌈",
+      label: "Rainbow",
+      key: "2",
+    },
+    {
+      id: "fire",
+      icon: "🔥",
+      label: "Fire",
+      key: "3",
+    },
+  ];
 
   return (
-    <div style={{ width: BOARD_WIDTH, maxWidth: "100%" }}>
-      <style>{COMBO_CSS}</style>
+    <div
+      style={{
+        width: W,
+        maxWidth: "100%",
+        margin: "0 auto",
+        color: "#fff",
+        fontFamily: "Inter, system-ui, sans-serif",
+      }}
+    >
+      <style>{`
+        @keyframes popText {
+          0% {
+            transform: translateY(8px) scale(.8);
+            opacity: 0;
+          }
+          20% {
+            opacity: 1;
+            transform: translateY(0) scale(1.08);
+          }
+          100% {
+            opacity: 0;
+            transform: translateY(-24px) scale(1);
+          }
+        }
 
-      {/* HUD: kept above the board so it never covers the play area */}
-      <div className="hud">
-        {onExit && (
-          <button onClick={onExit} className="icon-btn back-btn">
-            ☰ Levels
-          </button>
-        )}
+        .bs-btn {
+          border: 1px solid rgba(125,211,252,.25);
+          background: #172554;
+          color: #fff;
+          border-radius: 9px;
+          padding: 8px 10px;
+          font-weight: 800;
+          cursor: pointer;
+        }
 
-        <div className="hud-pills">
-          <span className="pill">Level {level.id}</span>
-          <span className="pill" aria-label={`${hud.shots} shots left`}>
-            🎯 {hud.shots}
-          </span>
-          <span className="pill" aria-label={`Score ${hud.score}`}>
-            ⭐ {hud.score}
-          </span>
-          {hud.combo >= 2 && <span className="pill hot">🔥 x{hud.combo}</span>}
-        </div>
+        .bs-btn:active {
+          transform: scale(.96);
+        }
 
-        <div className="hud-actions">
-          <button onClick={togglePause} aria-label="Pause game" className="icon-btn">
-            ⏸
-          </button>
-          <button
-            onClick={toggleMusic}
-            aria-label={musicOn ? "Turn music off" : "Turn music on"}
-            className="icon-btn"
-          >
-            {musicOn ? "🎵" : "🔕"}
-          </button>
-          <button
-            onClick={toggleSound}
-            aria-label={soundOn ? "Turn sound off" : "Turn sound on"}
-            className="icon-btn"
-          >
-            {soundOn ? "🔊" : "🔇"}
-          </button>
-        </div>
+        .bs-btn:disabled {
+          opacity: .35;
+          cursor: not-allowed;
+        }
+      `}</style>
+
+      {/* TOP BAR */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 6,
+          padding: 9,
+          background: "#111827",
+          borderRadius: 12,
+          marginBottom: 8,
+          border: "1px solid #1e3a5f",
+          fontSize: 12,
+        }}
+      >
+        <button
+          className="bs-btn"
+          onClick={
+            onLevelsClick ||
+            onExit ||
+            (() => {})
+          }
+        >
+          ☰ Levels
+        </button>
+
+        <strong style={{ color: "#7dd3fc" }}>
+          LEVEL {hud?.level ?? levelId}
+        </strong>
+
+        <strong>
+          ⭐ {hud?.score ?? 0}
+        </strong>
+
+        <button
+          className="bs-btn"
+          onClick={() => setSettings(true)}
+        >
+          ⚙️
+        </button>
+
+        <button
+          className="bs-btn"
+          onClick={togglePause}
+        >
+          Ⅱ
+        </button>
       </div>
 
-      {/* what the player has to do in this level */}
-      <div className="objective-bar" role="status">
-        {objectiveText}
+      {/* STATS */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 11,
+          color: "#cbd5e1",
+          margin: "0 4px 7px",
+        }}
+      >
+        <span>
+          🎯 {hud?.shots ?? 35} shots
+        </span>
+
+        <span>
+          🏆 Best: {bestScore}
+        </span>
+
+        <span>
+          🔥 Combo x{hud?.combo ?? 0}
+        </span>
       </div>
 
-      <div className="board-frame">
+      {/* GAME BOARD */}
+      <div
+        style={{
+          position: "relative",
+          borderRadius: 18,
+          overflow: "hidden",
+          border: "2px solid rgba(56,189,248,.35)",
+          background:
+            "radial-gradient(circle at 50% 35%,#1e3a5f,#071326 75%)",
+          boxShadow: "0 15px 35px #0009",
+        }}
+      >
         <canvas
           ref={canvasRef}
-          className="board-canvas"
-          width={BOARD_WIDTH}
-          height={CANVAS_HEIGHT}
-          onPointerMove={updateAim}
-          onPointerDown={updateAim}
+          width={W}
+          height={H}
+          onPointerMove={setAim}
+          onPointerDown={setAim}
           onPointerUp={(e) => {
-            updateAim(e);
+            setAim(e);
             shoot();
+          }}
+          style={{
+            display: "block",
+            width: "100%",
+            height: "auto",
+            touchAction: "none",
+            cursor: "crosshair",
           }}
         />
 
-        {/* COMBO pop-up text */}
-        {comboFlash && !hud.outcome && !paused && (
-          <div
-            key={comboFlash.id}
-            aria-live="polite"
+        {/* NEXT BUBBLE */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: 12,
+            left: 12,
+            padding: "6px 9px",
+            background: "#0f172add",
+            border: "1px solid #38bdf866",
+            borderRadius: 10,
+            textAlign: "center",
+          }}
+        >
+          <small
             style={{
-              position: "absolute",
-              left: "50%",
-              top: "40%",
-              pointerEvents: "none",
-              fontSize: "44px",
-              fontWeight: "900",
-              color: "#ffd93d",
-              textShadow: "0 3px 0 #b8501a, 0 0 18px rgba(255,150,0,0.8)",
-              whiteSpace: "nowrap",
-              animation: "comboPop 1.1s ease-out forwards",
+              display: "block",
+              color: "#94a3b8",
+              fontSize: 9,
             }}
           >
-            COMBO x{comboFlash.combo}!
+            NEXT
+          </small>
+
+          <span
+            style={{
+              display: "inline-block",
+              width: 22,
+              height: 22,
+              borderRadius: "50%",
+              background: hud?.next || game.next,
+              boxShadow: `0 0 10px ${
+                hud?.next || game.next
+              }`,
+            }}
+          />
+        </div>
+
+        {/* POP MESSAGE */}
+        {message && !hud?.outcome && (
+          <div
+            key={message}
+            style={{
+              position: "absolute",
+              top: "42%",
+              left: 0,
+              right: 0,
+              textAlign: "center",
+              color: "#fde68a",
+              fontSize: 24,
+              fontWeight: 900,
+              textShadow: "0 3px 12px #000",
+              pointerEvents: "none",
+              animation: "popText 1.3s forwards",
+            }}
+          >
+            {message}
           </div>
         )}
 
-        {/* PAUSED overlay */}
-        {paused && !hud.outcome && (
-          <div role="dialog" aria-label="Game paused" className="overlay">
-            <h2>PAUSED</h2>
-            <button onClick={togglePause} className="btn">
+        {/* PAUSE MENU */}
+        {paused && !hud?.outcome && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "#020617df",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <h2>⏸ PAUSED</h2>
+
+            <button
+              className="bs-btn"
+              onClick={togglePause}
+            >
               ▶ Resume
             </button>
-            <button onClick={restart} className="btn secondary">
+
+            <button
+              className="bs-btn"
+              onClick={() => restart()}
+            >
               ↻ Restart
             </button>
-            {onExit && (
-              <button onClick={onExit} className="btn secondary">
-                ☰ Levels
-              </button>
-            )}
-            <p style={{ fontSize: "13px", margin: 0, opacity: 0.8 }}>
-              Esc = Pause · R = Restart · Space = Shoot
-              <br />1 = Bomb · 2 = Rainbow · S = Swap · H = Hint
-            </p>
+
+            <button
+              className="bs-btn"
+              onClick={() => setSettings(true)}
+            >
+              ⚙️ Settings
+            </button>
           </div>
         )}
 
-        {/* Level complete / failed overlay */}
-        {hud.outcome && (
-          <div className="overlay">
-            <h2 className={hud.outcome === "WON" ? "win-title" : ""}>
-              {hud.outcome === "WON" ? "🎉 LEVEL COMPLETE!" : "LEVEL FAILED"}
+        {/* WIN / LOSE MENU */}
+        {hud?.outcome && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "#020617ed",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 12,
+              textAlign: "center",
+            }}
+          >
+            <div style={{ fontSize: 42 }}>
+              {hud.outcome === "WON" ? "🏆" : "💔"}
+            </div>
+
+            <h2
+              style={{
+                margin: 0,
+                color:
+                  hud.outcome === "WON"
+                    ? "#34d399"
+                    : "#fb7185",
+              }}
+            >
+              {hud.outcome === "WON"
+                ? "LEVEL CLEARED!"
+                : "GAME OVER"}
             </h2>
 
-            {hud.outcome === "WON" && (
-              <div
-                className="stars-row"
-                role="img"
-                aria-label={`${hud.stars} of 3 stars`}
+            <strong>
+              Score: {hud.score}
+            </strong>
+
+            {hud.outcome === "WON" ? (
+              <button
+                className="bs-btn"
+                onClick={nextLevel}
               >
-                {[1, 2, 3].map((n) => (
-                  <span
-                    key={n}
-                    className={`star${hud.stars >= n ? " on" : ""}`}
-                    style={{ animationDelay: `${0.2 + n * 0.25}s` }}
-                  >
-                    ★
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {hud.outcome === "LOST" && (
-              <p style={{ margin: 0, opacity: 0.9 }}>Objective incomplete: {objectiveText}</p>
-            )}
-
-            <div className="overlay-stats">
-              <span className="pill">Score: {hud.score}</span>
-              <span className="pill">🔥 Best Combo: x{Math.max(hud.bestCombo, 1)}</span>
-            </div>
-
-            {/* saving the verified result on the server */}
-            {saving && (
-              <p role="status" style={{ margin: 0 }}>
-                Saving progress...
-              </p>
-            )}
-            {saveStatus?.state === "saved" && (
-              <p role="status" style={{ margin: 0 }}>
-                ✅ Progress saved
-              </p>
-            )}
-            {saveStatus?.state === "error" && (
-              <div role="alert" style={{ maxWidth: "90%" }}>
-                <p style={{ margin: "0 0 8px" }}>⚠️ {saveStatus.message}</p>
-                {saveStatus.canRetry && onRetrySave && (
-                  <button onClick={onRetrySave} className="btn secondary">
-                    Try saving again
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className="btn-row">
-              {hud.outcome === "WON" && onNext && (
-                <button onClick={onNext} disabled={!nextReady} className="btn">
-                  Next Level ▶
-                </button>
-              )}
-              <button onClick={restart} disabled={saving} className="btn secondary">
-                {hud.outcome === "WON" ? "Replay" : "Retry"}
+                Next Level ➜
               </button>
-              {onExit && (
-                <button onClick={onExit} className="btn secondary">
-                  Levels
-                </button>
-              )}
-            </div>
+            ) : (
+              <button
+                className="bs-btn"
+                onClick={() => restart()}
+              >
+                ↻ Try Again
+              </button>
+            )}
+
+            <button
+              className="bs-btn"
+              onClick={() => restart(1)}
+            >
+              Start Level 1
+            </button>
+          </div>
+        )}
+
+        {/* SETTINGS */}
+        {settings && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "#020617ed",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <h2>⚙️ SETTINGS</h2>
+
+            <button
+              className="bs-btn"
+              onClick={() => setSound((v) => !v)}
+            >
+              {sound ? "🔊 Sound ON" : "🔇 Sound OFF"}
+            </button>
+
+            <button
+              className="bs-btn"
+              onClick={() => setMusic((v) => !v)}
+            >
+              {music ? "🎵 Music ON" : "🔕 Music OFF"}
+            </button>
+
+            <button
+              className="bs-btn"
+              onClick={() => setSettings(false)}
+            >
+              Done
+            </button>
           </div>
         )}
       </div>
 
-      {/* Booster + Swap + Hint bar */}
-      <div className="power-bar">
-        {BOOSTERS.map((b) => {
-          const count = hud.boosters[b.id];
-          const armed = hud.armed === b.id;
-          const disabled = barDisabled || (count <= 0 && !armed);
+      {/* BOOSTERS */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-around",
+          flexWrap: "wrap",
+          gap: 7,
+          padding: 10,
+          marginTop: 9,
+          background: "#111827",
+          border: "1px solid #1e3a5f",
+          borderRadius: 14,
+        }}
+      >
+        {boosters.map((booster) => {
+          const count =
+            hud?.boosters?.[booster.id] ??
+            game.boosters[booster.id];
+
+          const active =
+            hud?.armed === booster.id;
+
           return (
             <button
-              key={b.id}
-              onClick={() => toggleBooster(b.id)}
-              disabled={disabled}
-              aria-pressed={armed}
-              aria-label={`${b.name} booster, ${count} left. Key ${b.key}`}
-              className={`power-btn${armed ? " armed" : ""}`}
+              key={booster.id}
+              className="bs-btn"
+              onClick={() =>
+                toggleBooster(booster.id)
+              }
+              disabled={!count}
+              style={{
+                minWidth: 65,
+                background: active
+                  ? "#9f1239"
+                  : "#172554",
+                borderColor: active
+                  ? "#fda4af"
+                  : "#1e3a5f",
+              }}
             >
-              <span className="power-icon" aria-hidden="true">
-                {b.icon}
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 20,
+                }}
+              >
+                {booster.icon}
               </span>
-              <span className="power-label">{b.name}</span>
-              <span className="badge">{count}</span>
+
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 10,
+                }}
+              >
+                {booster.label} ×{count}
+              </span>
+
+              <span
+                style={{
+                  display: "block",
+                  fontSize: 9,
+                  color: "#94a3b8",
+                }}
+              >
+                Key {booster.key}
+              </span>
             </button>
           );
         })}
 
         <button
-          onClick={doSwap}
-          disabled={barDisabled || !!hud.armed}
-          aria-label="Swap current and next bubble. Key S"
-          className="power-btn swap-btn"
-          title="Swap current ↔ next (S)"
+          className="bs-btn"
+          onClick={swap}
         >
-          <span className="power-icon" aria-hidden="true">
+          <span
+            style={{
+              display: "block",
+              fontSize: 20,
+            }}
+          >
             🔄
           </span>
-          <span className="power-label">Swap</span>
+
+          <span style={{ fontSize: 10 }}>
+            Swap
+          </span>
         </button>
 
         <button
-          onClick={showHint}
-          disabled={barDisabled || hud.hints <= 0}
-          aria-label={`Hint, ${hud.hints} left. Key H`}
-          className="power-btn"
+          className="bs-btn"
+          onClick={hint}
         >
-          <span className="power-icon" aria-hidden="true">
+          <span
+            style={{
+              display: "block",
+              fontSize: 20,
+            }}
+          >
             💡
           </span>
-          <span className="power-label">Hint</span>
-          <span className="badge">{hud.hints}</span>
+
+          <span style={{ fontSize: 10 }}>
+            Hint ×{hud?.hints ?? 3}
+          </span>
         </button>
       </div>
 
-      <p aria-live="polite" className="status-line">
-        {statusLine}
-      </p>
+      {/* HELP */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginTop: 8,
+          color: "#94a3b8",
+          fontSize: 10,
+        }}
+      >
+        <span>Drag to aim • Release to shoot</span>
+        <span>Space: Shoot • Esc: Pause</span>
+      </div>
     </div>
   );
 }

@@ -1,101 +1,76 @@
-
-import { useState } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
-import { GAME_NAME } from "../config/gameConfig.js";
-import { useAuth } from "../context/AuthContext.jsx";
+import React, { useState } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 export default function Navbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const location = useLocation();
 
-  const close = () => setOpen(false);
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
-  async function handleLogout() {
-    close();
-    await logout();
-    navigate("/");
-  }
+  const navLinks = [
+    { name: 'Home', path: '/' },
+    { name: 'Dashboard', path: '/dashboard' },
+    { name: 'Levels', path: '/levels' },
+    { name: 'Leaderboard', path: '/leaderboard' },
+    { name: 'Achievements', path: '/achievements' },
+  ];
+
+  if (!user) return null;
 
   return (
-    <header className="nav">
-      {/* Logo */}
-      <Link to="/" className="nav-brand" onClick={close}>
-        <span className="nav-dot" aria-hidden="true" />
-        {GAME_NAME}
-      </Link>
+    <header className="custom-navbar">
+      <div className="nav-container">
+        
+        {/* Brand Logo */}
+        <Link to="/" className="nav-brand">
+          <div className="logo-badge">B</div>
+          <span className="brand-title">
+            BUBBLE <span>BLAST</span>
+          </span>
+        </Link>
 
-      {/* Mobile Menu Button */}
-      <button
-        className="nav-toggle"
-        aria-label="Toggle menu"
-        aria-expanded={open}
-        aria-controls="main-nav"
-        onClick={() => setOpen((previous) => !previous)}
-      >
-        {open ? "✕" : "☰"}
-      </button>
+        {/* Links */}
+        <nav className="nav-links">
+          {navLinks.map((link) => {
+            const isActive = location.pathname === link.path;
+            return (
+              <Link
+                key={link.name}
+                to={link.path}
+                className={`nav-link-item ${isActive ? 'active' : ''}`}
+              >
+                {link.name}
+              </Link>
+            );
+          })}
+        </nav>
 
-      {/* Navigation Links */}
-      <nav
-        id="main-nav"
-        aria-label="Main"
-        className={`nav-links${open ? " open" : ""}`}
-      >
-        <NavLink to="/" end className="nav-link" onClick={close}>
-          Home
-        </NavLink>
+        {/* User Profile & Actions */}
+        <div className="nav-user-section">
+          <div className="user-badge">
+            <span className="online-dot"></span>
+            <span>Hi, <strong>{user.username || user.name || 'Player'}</strong></span>
+          </div>
 
-        {user ? (
-          <>
-            <NavLink to="/dashboard" className="nav-link" onClick={close}>
-              Dashboard
-            </NavLink>
+          <Link
+            to="/profile"
+            className={`icon-btn ${location.pathname === '/profile' ? 'active' : ''}`}
+            title="Profile Settings"
+          >
+            ⚙️
+          </Link>
 
-            <NavLink to="/levels" className="nav-link" onClick={close}>
-              Levels
-            </NavLink>
+          <button onClick={handleLogout} className="logout-btn">
+            Log Out
+          </button>
+        </div>
 
-            <NavLink to="/leaderboard" className="nav-link" onClick={close}>
-              Leaderboard
-            </NavLink>
-
-            <NavLink to="/achievements" className="nav-link" onClick={close}>
-              Achievements
-            </NavLink>
-
-            <NavLink to="/profile" className="nav-link" onClick={close}>
-              Profile
-            </NavLink>
-
-            <NavLink to="/settings" className="nav-link" onClick={close}>
-              Settings
-            </NavLink>
-
-            <span className="nav-user">
-              Hi, {user.name}
-            </span>
-
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="nav-btn"
-            >
-              Log Out
-            </button>
-          </>
-        ) : (
-          <>
-            <NavLink to="/login" className="nav-link" onClick={close}>
-              Log In
-            </NavLink>
-
-            <Link to="/register" className="nav-btn" onClick={close}>
-              Sign Up
-            </Link>
-          </>
-        )}
-      </nav>
+      </div>
     </header>
   );
 }

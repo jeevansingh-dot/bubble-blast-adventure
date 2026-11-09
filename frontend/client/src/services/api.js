@@ -1,60 +1,43 @@
-import { API_URL } from "../config/gameConfig.js";
+import axios from 'axios';
 
-const TOKEN_KEY = "bubble_token";
+const API = axios.create({
+  baseURL: 'http://localhost:5001/api',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
 
-export function getToken() {
+// Automatically attach token to every request
+API.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Updated apiRequest wrapper to safely handle both body and query data
+export const apiRequest = async (method, url, data = null) => {
   try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setToken(token) {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    // storage blocked: login just won't survive a refresh
-  }
-}
-
-// Error with a friendly message and the HTTP status (0 = server not reachable)
-export class ApiError extends Error {
-  constructor(message, status) {
-    super(message);
-    this.status = status;
-  }
-}
-
-export async function apiRequest(path, { method = "GET", body, auth = true } = {}) {
-  const headers = { "Content-Type": "application/json" };
-  const token = getToken();
-  if (auth && token) headers.Authorization = `Bearer ${token}`;
-
-  let res;
-  try {
-    res = await fetch(`${API_URL}${path}`, {
+    const config = {
       method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  } catch {
-    throw new ApiError(
-      "Cannot reach the server. Check your internet connection and try again.",
-      0
-    );
-  }
+      url,
+    };
 
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    // response had no JSON body
-  }
+    // Agar GET request hai toh params mein bhejo, POST/PUT hai toh data (body) mein
+    if (method.toUpperCase() === 'GET') {
+      config.params = data;
+    } else {
+      config.data = data;
+    }
 
-  if (!res.ok) {
-    throw new ApiError(data?.message || "Something went wrong, please try again", res.status);
+    const response = await API(config);
+    return response.data;
+  } catch (error) {
+    console.error(`API Error [${method} ${url}]:`, error.response?.data || error.message);
+    throw error.response?.data || error.message;
   }
-  return data;
-}
+};
