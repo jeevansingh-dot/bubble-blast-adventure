@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const API = axios.create({
  
-  baseURL: import.meta.env.VITE_API_URL || 'https://your-backend-render-app.onrender.com/api',
+  baseURL: import.meta.env.VITE_API_URL || 'https://bubble-blast-adventure-4f4h.onrender.com',
 });
 
 // Automatically attach token to every request
