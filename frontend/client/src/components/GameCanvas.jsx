@@ -58,6 +58,15 @@ const BOOSTERS = [
   { id: "rainbow", icon: "🌈", name: "Rainbow", key: "2", info: "matches with any colour" },
 ];
 
+// Swap current ↔ next bubble (free, unlimited — classic bubble-shooter feature)
+function swapBubbles(g) {
+  if (g.status !== "READY" || g.paused || g.armed) return false;
+  const tmp = g.current;
+  g.current = g.next;
+  g.next = tmp;
+  return true;
+}
+
 // Fresh game state for a level. `seed` makes the bubble queue repeatable,
 // so the server can replay exactly this game.
 function createGame(level, seed) {
@@ -180,7 +189,7 @@ export default function GameCanvas({
     };
     window.addEventListener("pointerdown", kick, { once: true });
 
-    // Keyboard: Esc = pause, R = restart, Space = shoot, 1 = Bomb, 2 = Rainbow, H = hint
+    // Keyboard: Esc = pause, R = restart, Space = shoot, 1 = Bomb, 2 = Rainbow, H = hint, S = swap
     const onKey = (e) => {
       if (e.repeat) return;
       const a = actionsRef.current;
@@ -194,6 +203,8 @@ export default function GameCanvas({
         a.toggleBooster("bomb");
       } else if (e.key === "2") {
         a.toggleBooster("rainbow");
+      } else if (e.key === "s" || e.key === "S") {
+        a.doSwap();
       } else if (e.key === " " && e.target.tagName !== "BUTTON") {
         e.preventDefault();
         a.shoot();
@@ -326,6 +337,16 @@ export default function GameCanvas({
       g.armed = type;
     }
 
+    sfx.click();
+    setHud(snapshot(g));
+    render();
+  }
+
+  // Swap current bubble with the next bubble (free, unlimited)
+  function doSwap() {
+    const g = gameRef.current;
+    if (!swapBubbles(g)) return;
+    clearHint();
     sfx.click();
     setHud(snapshot(g));
     render();
@@ -498,7 +519,7 @@ export default function GameCanvas({
   }
 
   // keep the keyboard handler pointing at the newest functions
-  actionsRef.current = { togglePause, restart, shoot, toggleBooster, showHint };
+  actionsRef.current = { togglePause, restart, shoot, toggleBooster, showHint, doSwap };
 
   const armedInfo = BOOSTERS.find((b) => b.id === hud.armed);
   const barDisabled = paused || !!hud.outcome;
@@ -511,7 +532,7 @@ export default function GameCanvas({
     bestCombo: hud.bestCombo,
   });
 
-  let statusLine = "Tap a booster to arm it (uses 1 booster + 1 shot)";
+  let statusLine = "Swap bubbles (S) · Arm a booster · Hint (H) · Shoot";
   if (hintText) statusLine = hintText;
   else if (armedInfo)
     statusLine = `${armedInfo.icon} ${armedInfo.name} ready: ${armedInfo.info}. Shoot! (tap again to cancel)`;
@@ -618,7 +639,7 @@ export default function GameCanvas({
             )}
             <p style={{ fontSize: "13px", margin: 0, opacity: 0.8 }}>
               Esc = Pause · R = Restart · Space = Shoot
-              <br />1 = Bomb · 2 = Rainbow · H = Hint
+              <br />1 = Bomb · 2 = Rainbow · S = Swap · H = Hint
             </p>
           </div>
         )}
@@ -698,7 +719,7 @@ export default function GameCanvas({
         )}
       </div>
 
-      {/* Booster + hint bar */}
+      {/* Booster + Swap + Hint bar */}
       <div className="power-bar">
         {BOOSTERS.map((b) => {
           const count = hud.boosters[b.id];
@@ -721,6 +742,19 @@ export default function GameCanvas({
             </button>
           );
         })}
+
+        <button
+          onClick={doSwap}
+          disabled={barDisabled || !!hud.armed}
+          aria-label="Swap current and next bubble. Key S"
+          className="power-btn swap-btn"
+          title="Swap current ↔ next (S)"
+        >
+          <span className="power-icon" aria-hidden="true">
+            🔄
+          </span>
+          <span className="power-label">Swap</span>
+        </button>
 
         <button
           onClick={showHint}

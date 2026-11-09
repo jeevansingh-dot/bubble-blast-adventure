@@ -1,3 +1,4 @@
+
 import {
   boardFromLayout,
   getNeighbors,
@@ -13,15 +14,20 @@ import {
   BOARD_WIDTH,
 } from "../engine/index.js";
 
-// These must match frontend/client/src/components/GameCanvas.jsx
+// These must match frontend GameCanvas.jsx
 const LAUNCHER_X = BOARD_WIDTH / 2;
-const LAUNCHER_Y = 540; // canvas height 600 - 60
+const LAUNCHER_Y = 540;
+
 const MIN_ANGLE = (15 * Math.PI) / 180;
 const MAX_ANGLE = Math.PI - MIN_ANGLE;
-const DEFAULT_BOOSTERS = { bomb: 2, rainbow: 2 };
+
+const DEFAULT_BOOSTERS = {
+  bomb: 2,
+  rainbow: 2,
+};
+
 const EPS = 1e-6;
 
-// Thrown when a submitted game cannot be real
 export class CheatError extends Error {
   constructor(message) {
     super(message);
@@ -29,40 +35,94 @@ export class CheatError extends Error {
   }
 }
 
-// The browser tells us where the bubble landed. We simulate the shot ourselves and
-// accept the browser's cell only if it is the same cell or a direct neighbour
-// (tiny rounding differences between browsers must not punish honest players).
 function chooseCell(board, simCell, r, c) {
-  if (r === simCell.r && c === simCell.c) return simCell;
+  if (
+    r === simCell.r &&
+    c === simCell.c
+  ) {
+    return simCell;
+  }
 
-  const isNeighbour = getNeighbors(simCell.r, simCell.c, board.length).some(
+  const isNeighbour = getNeighbors(
+    simCell.r,
+    simCell.c,
+    board.length
+  ).some(
     ([nr, nc]) => nr === r && nc === c
   );
-  const isEmpty = Number.isInteger(r) && Number.isInteger(c) && board[r]?.[c] === null;
+
+  const isEmpty =
+    Number.isInteger(r) &&
+    Number.isInteger(c) &&
+    board[r]?.[c] === null;
+
   const isAttached =
     isEmpty &&
-    (r === 0 || getNeighbors(r, c, board.length).some(([nr, nc]) => board[nr][nc]));
+    (
+      r === 0 ||
+      getNeighbors(r, c, board.length).some(
+        ([nr, nc]) => board[nr][nc]
+      )
+    );
 
-  if (isNeighbour && isEmpty && isAttached) return { r, c };
-  throw new CheatError("Landing spot does not match the aim");
+  if (
+    isNeighbour &&
+    isEmpty &&
+    isAttached
+  ) {
+    return { r, c };
+  }
+
+  throw new CheatError(
+    "Landing spot does not match the aim"
+  );
 }
 
 /**
- * Plays the whole level again on the server.
- * level: level config, seed: the session's random seed,
- * shots: [{ angle, color, r, c }] in the order they were fired.
+ * Replays the complete game on the server.
+ *
+ * Each shot:
+ * {
+ *   angle,
+ *   color,
+ *   r,
+ *   c,
+ *   swapped: true | false
+ * }
  */
 export function replayGame(level, seed, shots) {
-  if (!Array.isArray(shots)) throw new CheatError("Shots are missing");
-  if (shots.length === 0) throw new CheatError("No shots were fired");
-  if (shots.length > level.shots) throw new CheatError("More shots than the level allows");
+  if (!Array.isArray(shots)) {
+    throw new CheatError("Shots are missing");
+  }
 
-  const objective = level.objective || { type: "clear_all" };
-  const limits = { ...DEFAULT_BOOSTERS, ...(level.boosters || {}) };
-  const used = { bomb: 0, rainbow: 0 };
+  if (shots.length === 0) {
+    throw new CheatError("No shots were fired");
+  }
+
+  if (shots.length > level.shots) {
+    throw new CheatError(
+      "More shots than the level allows"
+    );
+  }
+
+  const objective =
+    level.objective || {
+      type: "clear_all",
+    };
+
+  const limits = {
+    ...DEFAULT_BOOSTERS,
+    ...(level.boosters || {}),
+  };
+
+  const used = {
+    bomb: 0,
+    rainbow: 0,
+  };
 
   const board = boardFromLayout(level.layout);
   const rng = makeRng(seed);
+
   let current = pickColor(board, rng);
   let next = pickColor(board, rng);
 
@@ -72,72 +132,175 @@ export function replayGame(level, seed, shots) {
   let removed = 0;
   let floatingDropped = 0;
   let rescued = 0;
+
   let completed = false;
-  let ended = false; // objective done, or nothing left on the board
+  let ended = false;
 
   for (const s of shots) {
-    if (ended) throw new CheatError("Shots fired after the level ended");
+    if (ended) {
+      throw new CheatError(
+        "Shots fired after the level ended"
+      );
+    }
 
+    // Validate shot data
     if (
       !s ||
       typeof s !== "object" ||
       typeof s.angle !== "number" ||
       !Number.isFinite(s.angle) ||
       typeof s.color !== "string" ||
+      (
+        s.swapped !== undefined &&
+        typeof s.swapped !== "boolean"
+      ) ||
       !Number.isInteger(s.r) ||
       !Number.isInteger(s.c)
     ) {
       throw new CheatError("Malformed shot");
     }
-    if (s.angle < MIN_ANGLE - EPS || s.angle > MAX_ANGLE + EPS) {
-      throw new CheatError("Aim angle is not possible");
+
+    if (
+      s.angle < MIN_ANGLE - EPS ||
+      s.angle > MAX_ANGLE + EPS
+    ) {
+      throw new CheatError(
+        "Aim angle is not possible"
+      );
     }
 
-    // which bubble was fired?
     let color;
-    if (s.color === "bomb" || s.color === "rainbow") {
+
+    // BOOSTER SHOT
+    if (
+      s.color === "bomb" ||
+      s.color === "rainbow"
+    ) {
+      // A booster cannot consume a normal bubble swap.
+      if (s.swapped) {
+        throw new CheatError(
+          "A booster shot cannot consume a bubble swap"
+        );
+      }
+
       used[s.color] += 1;
-      if (used[s.color] > limits[s.color]) throw new CheatError("Booster used too many times");
-      color = s.color; // boosters do not use up the queue
+
+      if (used[s.color] > limits[s.color]) {
+        throw new CheatError(
+          "Booster used too many times"
+        );
+      }
+
+      color = s.color;
     } else {
-      if (s.color !== current) throw new CheatError("Bubble colour does not match the queue");
+      // NORMAL BUBBLE SWAP
+      if (s.swapped === true) {
+        const previousCurrent = current;
+
+        current = next;
+        next = previousCurrent;
+      }
+
+      // Verify the bubble against the server queue.
+      if (s.color !== current) {
+        throw new CheatError(
+          "Bubble colour does not match the queue"
+        );
+      }
+
       color = current;
+
+      // Advance the queue exactly like the frontend.
       current = next;
-      next = pickColor(board, rng); // same moment the browser picks it
+      next = pickColor(board, rng);
     }
 
-    const sim = traceShot(board, LAUNCHER_X, LAUNCHER_Y, s.angle);
-    if (!sim.cell) throw new CheatError("Shot cannot be placed");
-    const cell = chooseCell(board, sim.cell, s.r, s.c);
+    // Recalculate shot path on the server.
+    const sim = traceShot(
+      board,
+      LAUNCHER_X,
+      LAUNCHER_Y,
+      s.angle
+    );
 
-    const result = resolveShot(board, cell.r, cell.c, color);
+    if (!sim.cell) {
+      throw new CheatError(
+        "Shot cannot be placed"
+      );
+    }
+
+    const cell = chooseCell(
+      board,
+      sim.cell,
+      s.r,
+      s.c
+    );
+
+    // Resolve shot.
+    const result = resolveShot(
+      board,
+      cell.r,
+      cell.c,
+      color
+    );
 
     if (result.matched) {
       combo += 1;
-      bestCombo = Math.max(bestCombo, combo);
+
+      bestCombo = Math.max(
+        bestCombo,
+        combo
+      );
     } else {
       combo = 0;
     }
 
-    // the same scoring function the browser uses
-    score += calculateShotScore(result, Math.max(combo, 1));
-    removed += result.popped.length + result.floating.length;
-    floatingDropped += result.floating.length;
+    score += calculateShotScore(
+      result,
+      Math.max(combo, 1)
+    );
+
+    removed +=
+      result.popped.length +
+      result.floating.length;
+
+    floatingDropped +=
+      result.floating.length;
+
     rescued += countRescued(result);
 
-    completed = isObjectiveComplete(objective, {
-      board,
-      score,
-      floatingDropped,
-      bestCombo,
-    });
-    if (completed || countBubbles(board) === 0) ended = true;
+    completed = isObjectiveComplete(
+      objective,
+      {
+        board,
+        score,
+        floatingDropped,
+        bestCombo,
+      }
+    );
+
+    if (
+      completed ||
+      countBubbles(board) === 0
+    ) {
+      ended = true;
+    }
   }
 
   return {
     completed,
     score,
-    stars: completed ? Math.max(1, calculateStars(score, level.starThresholds)) : 0,
+
+    stars: completed
+      ? Math.max(
+          1,
+          calculateStars(
+            score,
+            level.starThresholds
+          )
+        )
+      : 0,
+
     bubblesPopped: removed,
     bestCombo,
     rescued,

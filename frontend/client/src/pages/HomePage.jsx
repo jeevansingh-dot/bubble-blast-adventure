@@ -13,28 +13,46 @@ const STEPS = [
 const FEATURES = [
   ["🗺️", "40+ Levels"],
   ["🧨", "Boosters"],
+  ["🔄", "Swap Bubble"],
   ["🏆", "Leaderboard"],
-  ["🏅", "Achievements"],
 ];
 
 export default function HomePage() {
   const { user } = useAuth();
 
   return (
-    <div style={{ textAlign: "center", maxWidth: "620px", padding: "16px 0 32px" }}>
+    <div
+      style={{
+        textAlign: "center",
+        maxWidth: "640px",
+        padding: "20px 0 40px",
+      }}
+    >
       <Mascot />
 
       <h1
         className="title-gradient"
         style={{
-          fontSize: "clamp(34px, 9vw, 64px)",
+          fontSize: "clamp(36px, 9vw, 68px)",
           lineHeight: 1.05,
-          margin: "8px 0 14px",
+          margin: "10px 0 16px",
           fontWeight: 900,
+          letterSpacing: "-0.5px",
         }}
       >
         {GAME_NAME}
       </h1>
+
+      <p
+        style={{
+          margin: "0 0 22px",
+          fontSize: "16px",
+          color: "rgba(244,246,255,0.75)",
+          fontWeight: 500,
+        }}
+      >
+        Aim. Match. Pop. Rescue the chicks.
+      </p>
 
       <div
         style={{
@@ -42,12 +60,12 @@ export default function HomePage() {
           gap: "8px",
           justifyContent: "center",
           flexWrap: "wrap",
-          marginBottom: "28px",
+          marginBottom: "30px",
         }}
       >
         {STEPS.map(([icon, label]) => (
           <span key={label} className="chip">
-            <span aria-hidden="true">{icon}</span> {label}.
+            <span aria-hidden="true">{icon}</span> {label}
           </span>
         ))}
       </div>
@@ -57,7 +75,7 @@ export default function HomePage() {
       </Link>
 
       {!user && (
-        <p style={{ marginTop: "18px" }}>
+        <p style={{ marginTop: "20px", color: "rgba(244,246,255,0.8)" }}>
           Already a player?{" "}
           <Link to="/login" style={{ color: "#ffd93d", fontWeight: "bold" }}>
             Log in
@@ -68,17 +86,20 @@ export default function HomePage() {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-          gap: "10px",
-          marginTop: "36px",
+          gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+          gap: "12px",
+          marginTop: "40px",
         }}
       >
         {FEATURES.map(([icon, label]) => (
           <div key={label} className="feature-card">
-            <div aria-hidden="true" style={{ fontSize: "26px" }}>
+            <div
+              aria-hidden="true"
+              style={{ fontSize: "28px", marginBottom: "6px" }}
+            >
               {icon}
             </div>
-            <strong>{label}</strong>
+            <strong style={{ fontSize: "14px" }}>{label}</strong>
           </div>
         ))}
       </div>
