@@ -1,8 +1,8 @@
 import axios from 'axios';
 
 const API = axios.create({
- 
-  baseURL: import.meta.env.VITE_API_URL || 'https://bubble-blast-adventure-4f4h.onrender.com',
+  // Last mein /api lagana zaroori hai!
+  baseURL: 'https://bubble-blast-adventure-4f4h.onrender.com/api',
 });
 
 // Automatically attach token to every request
@@ -17,15 +17,9 @@ API.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Updated apiRequest wrapper to safely handle both body and query data
 export const apiRequest = async (method, url, data = null) => {
   try {
-    const config = {
-      method,
-      url,
-    };
-
-    // Agar GET request hai toh params mein bhejo, POST/PUT hai toh data (body) mein
+    const config = { method, url };
     if (method.toUpperCase() === 'GET') {
       config.params = data;
     } else {

@@ -3,7 +3,21 @@ import axios from 'axios';
 
 const AuthContext = createContext();
 
-const API_URL = 'http://localhost:5001/api';
+const API_URL = 'https://bubble-blast-adventure-4f4h.onrender.com/api';
+
+const authAPI = axios.create({
+  baseURL: API_URL,
+});
+
+authAPI.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+
+  return config;
+});
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -11,8 +25,8 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
+
     if (token) {
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
       fetchCurrentUser();
     } else {
       setLoading(false);
@@ -21,11 +35,11 @@ export const AuthProvider = ({ children }) => {
 
   const fetchCurrentUser = async () => {
     try {
-      const res = await axios.get(`${API_URL}/auth/me`);
+      const res = await authAPI.get('/auth/me');
       setUser(res.data.user);
     } catch (err) {
       console.error('Session expired or invalid token:', err);
-      logout(); // Invalid token hone par cleanly logout kar dega
+      logout();
     } finally {
       setLoading(false);
     }
@@ -34,16 +48,16 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     const payload = {
       email: String(email || '').trim(),
-      password: String(password || '')
+      password: String(password || ''),
     };
 
-    const res = await axios.post(`${API_URL}/auth/login`, payload);
-    
+    const res = await authAPI.post('/auth/login', payload);
+
     if (res.data.token) {
       localStorage.setItem('token', res.data.token);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`;
       setUser(res.data.user);
     }
+
     return res.data;
   };
 
@@ -52,22 +66,21 @@ export const AuthProvider = ({ children }) => {
       name: String(name || '').trim(),
       email: String(email || '').trim(),
       password: String(password || ''),
-      confirmPassword: String(confirmPassword || '')
+      confirmPassword: String(confirmPassword || ''),
     };
 
-    const res = await axios.post(`${API_URL}/auth/register`, payload);
+    const res = await authAPI.post('/auth/register', payload);
 
     if (res.data.token) {
       localStorage.setItem('token', res.data.token);
-      axios.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`;
       setUser(res.data.user);
     }
+
     return res.data;
   };
 
   const logout = () => {
     localStorage.removeItem('token');
-    delete axios.defaults.headers.common['Authorization'];
     setUser(null);
     setLoading(false);
   };
