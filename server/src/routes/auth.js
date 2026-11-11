@@ -1,3 +1,4 @@
+
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -7,108 +8,171 @@ import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
-// Max 30 register/login attempts per IP every 15 minutes (stops password guessing)
+// Limit login and registration attempts
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { message: "Too many attempts, please try again in a few minutes" },
+  message: {
+    message: "Too many attempts, please try again in a few minutes",
+  },
 });
 
+// Email validation
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Used when the email does not exist, so login takes the same time either way
+// Dummy hash for consistent login comparison
 const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", 12);
 
+// Generate JWT token
 function signToken(userId) {
-  return jwt.sign({ id: userId }, process.env.JWT_SECRET, {
-    algorithm: "HS256",
-    expiresIn: "7d",
-  });
+  if (!process.env.JWT_SECRET) {
+    throw new Error("JWT_SECRET is not configured");
+  }
+
+  return jwt.sign(
+    { id: userId },
+    process.env.JWT_SECRET,
+    {
+      algorithm: "HS256",
+      expiresIn: "7d",
+    }
+  );
 }
 
+// REGISTER
 // POST /api/auth/register
 router.post("/register", authLimiter, async (req, res, next) => {
   try {
     const { name, email, password, confirmPassword } = req.body || {};
 
-    // only plain strings are allowed (blocks tricks like {"$gt": ""})
-    if (![name, email, password, confirmPassword].every((v) => typeof v === "string")) {
-      return res.status(400).json({ message: "Please fill in all fields" });
+    if (
+      typeof name !== "string" ||
+      typeof email !== "string" ||
+      typeof password !== "string" ||
+      typeof confirmPassword !== "string"
+    ) {
+      return res.status(400).json({
+        message: "Please fill in all fields",
+      });
     }
 
     const cleanName = name.trim();
     const cleanEmail = email.trim().toLowerCase();
 
     if (cleanName.length < 2 || cleanName.length > 40) {
-      return res.status(400).json({ message: "Name must be 2 to 40 characters" });
-    }
-    if (!EMAIL_RE.test(cleanEmail) || cleanEmail.length > 120) {
-      return res.status(400).json({ message: "Please enter a valid email" });
-    }
-    if (password.length < 8 || password.length > 72) {
-      return res.status(400).json({ message: "Password must be 8 to 72 characters" });
-    }
-    if (password !== confirmPassword) {
-      return res.status(400).json({ message: "Passwords do not match" });
+      return res.status(400).json({
+        message: "Name must be 2 to 40 characters",
+      });
     }
 
-    if (await User.findOne({ email: cleanEmail })) {
-      return res.status(409).json({ message: "This email is already registered" });
+    if (!EMAIL_RE.test(cleanEmail) || cleanEmail.length > 120) {
+      return res.status(400).json({
+        message: "Please enter a valid email",
+      });
+    }
+
+    if (password.length < 8 || password.length > 72) {
+      return res.status(400).json({
+        message: "Password must be 8 to 72 characters",
+      });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({
+        message: "Passwords do not match",
+      });
+    }
+
+    const existingUser = await User.findOne({
+      email: cleanEmail,
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        message: "This email is already registered",
+      });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
+
     const user = await User.create({
       name: cleanName,
       email: cleanEmail,
       passwordHash,
     });
 
-    res.status(201).json({ token: signToken(user.id), user: user.toPublic() });
+    return res.status(201).json({
+      token: signToken(user.id),
+      user: user.toPublic(),
+    });
   } catch (err) {
     if (err.code === 11000) {
-      // two people registered the same email at the same moment
-      return res.status(409).json({ message: "This email is already registered" });
+      return res.status(409).json({
+        message: "This email is already registered",
+      });
     }
+
     next(err);
   }
 });
 
+// LOGIN
 // POST /api/auth/login
 router.post("/login", authLimiter, async (req, res, next) => {
   try {
     const { email, password } = req.body || {};
 
-    if (typeof email !== "string" || typeof password !== "string") {
-      return res.status(400).json({ message: "Please enter email and password" });
+    if (
+      typeof email !== "string" ||
+      typeof password !== "string"
+    ) {
+      return res.status(400).json({
+        message: "Please enter email and password",
+      });
     }
 
-    const user = await User.findOne({ email: email.trim().toLowerCase() }).select(
-      "+passwordHash"
+    const cleanEmail = email.trim().toLowerCase();
+
+    const user = await User.findOne({
+      email: cleanEmail,
+    }).select("+passwordHash");
+
+    const passwordMatches = await bcrypt.compare(
+      password,
+      user ? user.passwordHash : DUMMY_HASH
     );
 
-    // same message for "no such email" and "wrong password"
-    const ok = await bcrypt.compare(password, user ? user.passwordHash : DUMMY_HASH);
-    if (!user || !ok) {
-      return res.status(401).json({ message: "Invalid email or password" });
+    if (!user || !passwordMatches) {
+      return res.status(401).json({
+        message: "Invalid email or password",
+      });
     }
 
-    res.json({ token: signToken(user.id), user: user.toPublic() });
+    return res.json({
+      token: signToken(user.id),
+      user: user.toPublic(),
+    });
   } catch (err) {
     next(err);
   }
 });
 
-// GET /api/auth/me  (protected) - who is logged in?
+// CURRENT USER
+// GET /api/auth/me
 router.get("/me", requireAuth, (req, res) => {
-  res.json({ user: req.user.toPublic() });
+  return res.json({
+    user: req.user.toPublic(),
+  });
 });
 
+// LOGOUT
 // POST /api/auth/logout
-// JWT tokens are stateless, so the browser simply deletes its saved token.
 router.post("/logout", requireAuth, (req, res) => {
-  res.json({ message: "Logged out" });
+  return res.json({
+    message: "Logged out",
+  });
 });
 
 export default router;
