@@ -1,6 +1,13 @@
+
+
 import { apiRequest } from "./api.js";
 
-// Returns { leaderboard: [...], you: { rank, score, stars, ... } }
+// Fetch top players and your own rank
 export function fetchLeaderboard() {
-  return apiRequest("/leaderboard");
+  return apiRequest("GET", "/leaderboard");
+}
+
+// Fetch only your own rank and stats
+export function fetchMyRank() {
+  return apiRequest("GET", "/leaderboard/me");
 }

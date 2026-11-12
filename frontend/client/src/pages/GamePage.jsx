@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import GameCanvas from "../components/GameCanvas.jsx";
@@ -6,7 +7,12 @@ import { LEVELS, getLevel } from "../data/levels.js";
 import { isUnlocked, progressFromUser } from "../utils/progress.js";
 import { startSession, completeSession } from "../services/gameService.js";
 
-const boxStyle = { textAlign: "center", padding: "32px 12px", maxWidth: "420px" };
+const boxStyle = {
+  textAlign: "center",
+  padding: "32px 12px",
+  maxWidth: "420px",
+};
+
 const buttonStyle = {
   padding: "10px 24px",
   fontSize: "18px",
@@ -23,64 +29,135 @@ export default function GamePage() {
   const { levelId } = useParams();
   const navigate = useNavigate();
   const { user, setUser } = useAuth();
+
   const id = Number(levelId);
 
-  const [session, setSession] = useState(null); // { sessionToken, seed, levelId }
+  const [session, setSession] = useState(null);
   const [loadError, setLoadError] = useState("");
-  const [save, setSave] = useState({ state: "idle", message: "", canRetry: false });
-  const [badges, setBadges] = useState([]); // achievements unlocked by the last game
-  const pendingRef = useRef(null); // finished game waiting to be saved
+  const [save, setSave] = useState({
+    state: "idle",
+    message: "",
+    canRetry: false,
+  });
+  const [badges, setBadges] = useState([]);
+
+  const pendingRef = useRef(null);
   const startedForRef = useRef(null);
+  const sessionRef = useRef(null);
 
-  const validId = Number.isInteger(id) && id >= 1 && id <= 1000;
-  const unlocked = validId && isUnlocked(id, progressFromUser(user));
+  const validId =
+    Number.isInteger(id) && id >= 1 && id <= LEVELS.length;
 
-  // Gets a fresh game session (also used when the player restarts the level)
+  const unlocked =
+    validId && isUnlocked(id, progressFromUser(user));
+
+  // Start a fresh session for the current level.
   async function beginSession() {
     setSession(null);
+    sessionRef.current = null;
+
     setLoadError("");
     setBadges([]);
-    setSave({ state: "idle", message: "", canRetry: false });
+
+    setSave({
+      state: "idle",
+      message: "",
+      canRetry: false,
+    });
+
     pendingRef.current = null;
+
     try {
       const s = await startSession(id);
+
+      sessionRef.current = s;
       setSession(s);
     } catch (err) {
-      setLoadError(err.message);
+      setLoadError(err.message || "Could not start level.");
     }
   }
+  
 
+  // Start a session whenever the route level changes.
   useEffect(() => {
     if (!validId || !unlocked) return;
-    // in development React runs effects twice: make sure we only start ONE session
+
     if (startedForRef.current === id) return;
+
     startedForRef.current = id;
     beginSession();
-  }, [id]);
 
-  // Called by the game when the level ends (win or lose)
+    return () => {
+      sessionRef.current = null;
+    };
+  }, [id, validId, unlocked]);
+
+  // Save completed game result.
   async function submit(result) {
-    if (!result || !session) return;
-    pendingRef.current = result;
-    setSave({ state: "saving", message: "", canRetry: false });
+    const activeSession = sessionRef.current;
+console.log("========== GAME DEBUG ==========");
+console.log("RESULT:", result);
+console.log("SESSION:", sessionRef.current);
+console.log("SHOTS:", result?.shots);
+console.log("SHOTS IS ARRAY:", Array.isArray(result?.shots));
+console.log("SCORE:", result?.score);
+console.log("================================");
+    if (!result || !activeSession || pendingRef.current?.saving) {
+      return;
+    }
+
+    pendingRef.current = {
+      ...result,
+      saving: true,
+    };
+
+    setSave({
+      state: "saving",
+      message: "",
+      canRetry: false,
+    });
+
     try {
       const data = await completeSession({
-        sessionToken: session.sessionToken,
+        sessionToken: activeSession.sessionToken,
         shots: result.shots,
         claimedScore: result.score,
       });
-      setUser(data.user); // the server's verified progress
+
+      setUser(data.user);
       setBadges(data.newAchievements || []);
+
       pendingRef.current = null;
-      setSave({ state: "saved", message: "", canRetry: false });
+
+      setSave({
+        state: "saved",
+        message: "",
+        canRetry: false,
+      });
     } catch (err) {
+      if (pendingRef.current) {
+        pendingRef.current.saving = false;
+      }
+
       setSave({
         state: "error",
-        message: err.message,
-        // only worth retrying when the server could not be reached / crashed
+        message: err.message || "Could not save progress.",
         canRetry: err.status === 0 || err.status >= 500,
       });
     }
+  }
+
+  // Retry saving the previous result.
+  async function retrySave() {
+    const pending = pendingRef.current;
+
+    if (!pending || pending.saving) return;
+
+    await submit({
+      score: pending.score,
+      shots: pending.shots,
+      outcome: pending.outcome,
+    });
   }
 
   if (!validId || !unlocked) {
@@ -91,10 +168,15 @@ export default function GamePage() {
     return (
       <div style={boxStyle} role="alert">
         <p>{loadError}</p>
+
         <button onClick={beginSession} style={buttonStyle}>
           Try again
         </button>
-        <button onClick={() => navigate("/levels")} style={buttonStyle}>
+
+        <button
+          onClick={() => navigate("/levels")}
+          style={buttonStyle}
+        >
           Back to levels
         </button>
       </div>
@@ -113,7 +195,6 @@ export default function GamePage() {
 
   return (
     <>
-      {/* new achievements unlocked by the game that just finished */}
       {badges.length > 0 && (
         <div
           role="status"
@@ -134,12 +215,17 @@ export default function GamePage() {
         >
           <div>
             <strong>🏅 Achievement unlocked!</strong>
+
             {badges.map((b) => (
               <div key={b.id}>
-                {b.icon} {b.name} <span style={{ opacity: 0.8 }}>· {b.description}</span>
+                {b.icon} {b.name}{" "}
+                <span style={{ opacity: 0.8 }}>
+                  · {b.description}
+                </span>
               </div>
             ))}
           </div>
+
           <button
             onClick={() => setBadges([])}
             aria-label="Dismiss"
@@ -162,9 +248,15 @@ export default function GamePage() {
         seed={session.seed}
         saveStatus={save}
         onFinish={submit}
-        onRetrySave={() => submit(pendingRef.current)}
+        onRetrySave={retrySave}
         onRestart={beginSession}
-        onNext={hasNext ? () => navigate(`/game/${id + 1}`) : null}
+        onNext={() => {
+          if (save.state !== "saved") return;
+
+          if (hasNext) {
+            navigate(`/game/${id + 1}`);
+          }
+        }}
         onExit={() => navigate("/levels")}
       />
     </>
