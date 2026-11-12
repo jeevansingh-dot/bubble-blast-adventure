@@ -1,3 +1,4 @@
+
 import React, {
   useCallback,
   useEffect,
@@ -258,8 +259,6 @@ export default function GameCanvas({
   const shotLockRef = useRef(false);
   const pointerDownRef = useRef(false);
   const activePointerIdRef = useRef(null);
-
-  // NEW: prevents accidental shooting after dragging outside canvas
   const pointerCancelledRef = useRef(false);
 
   const audioContextRef = useRef(null);
@@ -496,7 +495,7 @@ export default function GameCanvas({
       }
     }
 
-    // FLYING BUBBLE
+    // FLYING BUBBLE - REAL WALL BOUNCE ANIMATION
 
     if (g.flyingBubble) {
       const b = g.flyingBubble;
@@ -509,11 +508,71 @@ export default function GameCanvas({
 
       const eased = 1 - Math.pow(1 - progress, 3);
 
-      const currentX =
-        b.startX + (b.endX - b.startX) * eased;
+      const points =
+        b.path && b.path.length > 1
+          ? b.path
+          : [
+              { x: b.startX, y: b.startY },
+              { x: b.endX, y: b.endY },
+            ];
 
-      const currentY =
-        b.startY + (b.endY - b.startY) * eased;
+      // Calculate total path distance
+
+      let totalDistance = 0;
+      const segmentLengths = [];
+
+      for (let i = 1; i < points.length; i++) {
+        const distance = Math.hypot(
+          points[i].x - points[i - 1].x,
+          points[i].y - points[i - 1].y
+        );
+
+        segmentLengths.push(distance);
+        totalDistance += distance;
+      }
+
+      // Current position along the complete path
+
+      let remainingDistance = totalDistance * eased;
+
+      let currentX = points[0].x;
+      let currentY = points[0].y;
+
+      const trailPoints = [{ x: currentX, y: currentY }];
+
+      for (let i = 0; i < segmentLengths.length; i++) {
+        const segmentLength = segmentLengths[i];
+
+        const from = points[i];
+        const to = points[i + 1];
+
+        if (remainingDistance >= segmentLength) {
+          currentX = to.x;
+          currentY = to.y;
+
+          trailPoints.push({
+            x: currentX,
+            y: currentY,
+          });
+
+          remainingDistance -= segmentLength;
+        } else {
+          const t =
+            segmentLength > 0
+              ? remainingDistance / segmentLength
+              : 0;
+
+          currentX = from.x + (to.x - from.x) * t;
+          currentY = from.y + (to.y - from.y) * t;
+
+          trailPoints.push({
+            x: currentX,
+            y: currentY,
+          });
+
+          break;
+        }
+      }
 
       const fill = COLOR_MAP[b.color] || b.color;
 
@@ -531,15 +590,21 @@ export default function GameCanvas({
       ctx.save();
 
       ctx.beginPath();
-      ctx.moveTo(b.startX, b.startY);
-      ctx.lineTo(currentX, currentY);
+      ctx.moveTo(trailPoints[0].x, trailPoints[0].y);
+
+      trailPoints.forEach((point) => {
+        ctx.lineTo(point.x, point.y);
+      });
 
       ctx.strokeStyle = trailGradient;
       ctx.lineWidth = R * 0.85;
       ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.shadowColor = fill;
       ctx.shadowBlur = 15;
       ctx.stroke();
+
+      // Small particles
 
       for (let i = 1; i <= 5; i++) {
         const t = i / 6;
@@ -847,11 +912,18 @@ export default function GameCanvas({
       g.next = pickColor(g.board, g.rng);
     }
 
+    // IMPORTANT: Store complete trajectory path.
+    // Actual bubble will now follow every wall bounce.
+
     g.flyingBubble = {
       startX: LAUNCHER_X,
       startY: LAUNCHER_Y,
       endX: target.x,
       endY: target.y,
+      path: [
+        ...simulation.path,
+        target,
+      ],
       color,
       start: performance.now(),
       duration: 230,
@@ -959,7 +1031,6 @@ export default function GameCanvas({
   // MOBILE + DESKTOP POINTER CONTROLS
   // =====================================
 
-  // Checks whether pointer is currently inside the canvas.
   const isInsideCanvas = useCallback((event) => {
     const canvas = canvasRef.current;
 
@@ -975,7 +1046,6 @@ export default function GameCanvas({
     );
   }, []);
 
-  // Reset active pointer safely.
   const resetPointer = useCallback(() => {
     const canvas = canvasRef.current;
     const pointerId = activePointerIdRef.current;
@@ -1050,7 +1120,6 @@ export default function GameCanvas({
           return;
         }
 
-        // If finger moves outside canvas, cancel the shot.
         if (!isInsideCanvas(event)) {
           pointerCancelledRef.current = true;
           return;
@@ -1063,6 +1132,7 @@ export default function GameCanvas({
       }
 
       // Desktop mouse hover aiming.
+
       if (pointerDownRef.current) {
         if (activePointerIdRef.current !== event.pointerId) {
           return;
@@ -1102,7 +1172,6 @@ export default function GameCanvas({
 
       resetPointer();
 
-      // Shoot only when released inside the game canvas.
       if (shouldShoot) {
         shoot();
       }
@@ -1729,6 +1798,12 @@ export default function GameCanvas({
           background: linear-gradient(135deg,rgba(24,34,73,.96),rgba(12,18,43,.96));
           box-shadow: 0 12px 30px rgba(0,0,0,.25), inset 0 1px rgba(255,255,255,.06);
           box-sizing: border-box;
+          touch-action: manipulation;
+        }
+
+        .bs-controls button {
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
         }
 
         .bs-controls .bs-btn {
@@ -1768,9 +1843,7 @@ export default function GameCanvas({
           font-weight: 700;
         }
 
-        /* =================================
-           MOBILE RESPONSIVE
-        ================================= */
+        /* MOBILE RESPONSIVE */
 
         @media (max-width: 600px) {
           .bs-game-shell {
