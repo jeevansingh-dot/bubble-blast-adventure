@@ -1,4 +1,3 @@
-
 import React, {
   useCallback,
   useEffect,
@@ -258,9 +257,10 @@ export default function GameCanvas({
 
   const shotLockRef = useRef(false);
   const pointerDownRef = useRef(false);
-
-  // Mobile touch protection
   const activePointerIdRef = useRef(null);
+
+  // NEW: prevents accidental shooting after dragging outside canvas
+  const pointerCancelledRef = useRef(false);
 
   const audioContextRef = useRef(null);
   const musicTimerRef = useRef(null);
@@ -679,6 +679,7 @@ export default function GameCanvas({
       shotLockRef.current = false;
       pointerDownRef.current = false;
       activePointerIdRef.current = null;
+      pointerCancelledRef.current = false;
 
       setPaused(false);
       stopMusic();
@@ -958,9 +959,50 @@ export default function GameCanvas({
   // MOBILE + DESKTOP POINTER CONTROLS
   // =====================================
 
+  // Checks whether pointer is currently inside the canvas.
+  const isInsideCanvas = useCallback((event) => {
+    const canvas = canvasRef.current;
+
+    if (!canvas) return false;
+
+    const rect = canvas.getBoundingClientRect();
+
+    return (
+      event.clientX >= rect.left &&
+      event.clientX <= rect.right &&
+      event.clientY >= rect.top &&
+      event.clientY <= rect.bottom
+    );
+  }, []);
+
+  // Reset active pointer safely.
+  const resetPointer = useCallback(() => {
+    const canvas = canvasRef.current;
+    const pointerId = activePointerIdRef.current;
+
+    pointerDownRef.current = false;
+    activePointerIdRef.current = null;
+    pointerCancelledRef.current = false;
+
+    try {
+      if (
+        canvas &&
+        pointerId !== null &&
+        canvas.hasPointerCapture(pointerId)
+      ) {
+        canvas.releasePointerCapture(pointerId);
+      }
+    } catch {}
+  }, []);
+
   const handlePointerDown = useCallback(
     (event) => {
-      if (event.button !== undefined && event.button !== 0) {
+      if (event.isPrimary === false) return;
+
+      if (
+        event.pointerType === "mouse" &&
+        event.button !== 0
+      ) {
         return;
       }
 
@@ -975,7 +1017,6 @@ export default function GameCanvas({
         return;
       }
 
-      // Prevent multiple fingers controlling the game
       if (activePointerIdRef.current !== null) {
         return;
       }
@@ -984,6 +1025,7 @@ export default function GameCanvas({
 
       activePointerIdRef.current = event.pointerId;
       pointerDownRef.current = true;
+      pointerCancelledRef.current = false;
 
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -996,27 +1038,47 @@ export default function GameCanvas({
 
   const handlePointerMove = useCallback(
     (event) => {
-      // Only active finger can control mobile aiming
-      if (
-        event.pointerType === "touch" &&
-        (!pointerDownRef.current ||
-          activePointerIdRef.current !== event.pointerId)
-      ) {
+      const isTouch =
+        event.pointerType === "touch" ||
+        event.pointerType === "pen";
+
+      if (isTouch) {
+        if (
+          !pointerDownRef.current ||
+          activePointerIdRef.current !== event.pointerId
+        ) {
+          return;
+        }
+
+        // If finger moves outside canvas, cancel the shot.
+        if (!isInsideCanvas(event)) {
+          pointerCancelledRef.current = true;
+          return;
+        }
+
+        if (pointerCancelledRef.current) return;
+
+        aim(event);
         return;
       }
 
-      // Ignore other active pointers
-      if (
-        pointerDownRef.current &&
-        activePointerIdRef.current !== event.pointerId
-      ) {
-        return;
+      // Desktop mouse hover aiming.
+      if (pointerDownRef.current) {
+        if (activePointerIdRef.current !== event.pointerId) {
+          return;
+        }
+
+        if (!isInsideCanvas(event)) {
+          pointerCancelledRef.current = true;
+          return;
+        }
+
+        if (pointerCancelledRef.current) return;
       }
 
-      // Desktop mouse can aim by moving
       aim(event);
     },
-    [aim]
+    [aim, isInsideCanvas]
   );
 
   const handlePointerUp = useCallback(
@@ -1030,20 +1092,22 @@ export default function GameCanvas({
 
       event.preventDefault();
 
-      aim(event);
+      const shouldShoot =
+        !pointerCancelledRef.current &&
+        isInsideCanvas(event);
 
-      pointerDownRef.current = false;
-      activePointerIdRef.current = null;
+      if (shouldShoot) {
+        aim(event);
+      }
 
-      try {
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-      } catch {}
+      resetPointer();
 
-      shoot();
+      // Shoot only when released inside the game canvas.
+      if (shouldShoot) {
+        shoot();
+      }
     },
-    [aim, shoot]
+    [aim, shoot, isInsideCanvas, resetPointer]
   );
 
   const handlePointerCancel = useCallback(
@@ -1055,10 +1119,9 @@ export default function GameCanvas({
         return;
       }
 
-      pointerDownRef.current = false;
-      activePointerIdRef.current = null;
+      resetPointer();
     },
-    []
+    [resetPointer]
   );
 
   // =====================================
@@ -1123,6 +1186,7 @@ export default function GameCanvas({
     shotLockRef.current = false;
     pointerDownRef.current = false;
     activePointerIdRef.current = null;
+    pointerCancelledRef.current = false;
 
     if (onRestart) {
       finishReportedRef.current = false;
@@ -1161,6 +1225,7 @@ export default function GameCanvas({
 
       pointerDownRef.current = false;
       activePointerIdRef.current = null;
+      pointerCancelledRef.current = false;
     }
 
     draw();
@@ -1213,6 +1278,7 @@ export default function GameCanvas({
     shotLockRef.current = false;
     pointerDownRef.current = false;
     activePointerIdRef.current = null;
+    pointerCancelledRef.current = false;
 
     setPaused(false);
     setMessage("");
@@ -1224,6 +1290,7 @@ export default function GameCanvas({
       shotLockRef.current = false;
       pointerDownRef.current = false;
       activePointerIdRef.current = null;
+      pointerCancelledRef.current = false;
     };
   }, [actualLevel, seed, sync]);
 
@@ -1534,8 +1601,6 @@ export default function GameCanvas({
           display: block;
         }
 
-        /* TOUCH INSTRUCTION */
-
         .bs-touch-hint {
           display: none;
         }
@@ -1703,21 +1768,30 @@ export default function GameCanvas({
           font-weight: 700;
         }
 
-        /* MOBILE RESPONSIVE */
+        /* =================================
+           MOBILE RESPONSIVE
+        ================================= */
 
         @media (max-width: 600px) {
           .bs-game-shell {
-            padding: 6px;
-            border-radius: 14px;
-            width: 100%;
+            width: 100% !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            padding: 6px !important;
+            margin: 0 auto !important;
+            border-radius: 14px !important;
+            box-sizing: border-box !important;
+            overflow: hidden;
           }
 
           .bs-topbar {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 7px;
-            padding: 8px;
-            margin-bottom: 8px;
+            gap: 6px;
+            width: 100%;
+            padding: 7px;
+            margin-bottom: 7px;
+            box-sizing: border-box;
           }
 
           .bs-topbar > * {
@@ -1727,18 +1801,24 @@ export default function GameCanvas({
 
           .bs-topbar strong {
             font-size: 10px;
+            letter-spacing: 0;
           }
 
           .bs-topbar .bs-btn {
             min-height: 38px;
-            padding: 7px 5px;
+            padding: 6px 3px;
             font-size: 11px;
+            border-radius: 9px;
           }
 
           .bs-game-stage {
-            width: 100%;
-            aspect-ratio: ${W} / ${H};
+            width: 100% !important;
+            height: min(72svh, 540px) !important;
+            min-height: 340px;
+            max-height: 540px;
+            aspect-ratio: auto !important;
             border-radius: 12px;
+            overflow: hidden;
             touch-action: none;
             overscroll-behavior: contain;
             user-select: none;
@@ -1746,6 +1826,9 @@ export default function GameCanvas({
           }
 
           .bs-game-stage canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
             touch-action: none !important;
             user-select: none;
             -webkit-user-select: none;
@@ -1764,29 +1847,34 @@ export default function GameCanvas({
             left: 50%;
             transform: translateX(-50%);
             z-index: 4;
+            max-width: calc(100% - 100px);
             white-space: nowrap;
+            text-align: center;
             pointer-events: none;
-            padding: 6px 10px;
+            padding: 6px 9px;
             border-radius: 20px;
-            background: rgba(15, 23, 42, .78);
-            border: 1px solid rgba(125, 211, 252, .3);
+            background: rgba(15,23,42,.82);
+            border: 1px solid rgba(125,211,252,.3);
             color: #bae6fd;
-            font-size: 9px;
+            font-size: 8px;
             font-weight: 800;
-            letter-spacing: 1px;
+            letter-spacing: .5px;
           }
 
           .bs-controls {
+            width: 100%;
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 8px;
-            padding: 8px;
-            margin-top: 8px;
+            gap: 7px;
+            padding: 7px;
+            margin-top: 7px;
+            box-sizing: border-box;
           }
 
           .bs-controls .bs-btn {
-            min-height: 62px;
-            padding: 7px 4px;
-            border-radius: 12px;
+            min-width: 0;
+            min-height: 56px;
+            padding: 6px 3px;
+            border-radius: 10px;
             touch-action: manipulation;
           }
 
@@ -1795,16 +1883,20 @@ export default function GameCanvas({
           }
 
           .bs-game-info {
+            width: 100%;
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
             justify-content: center;
             text-align: center;
-            gap: 9px;
-            padding: 10px 6px;
+            gap: 8px;
+            padding: 9px 5px;
+            margin-top: 7px;
+            box-sizing: border-box;
           }
 
           .bs-game-info span {
-            font-size: 10px;
+            font-size: 9px;
+            overflow-wrap: anywhere;
           }
 
           .bs-transition-title {
@@ -1831,24 +1923,32 @@ export default function GameCanvas({
           }
         }
 
+        /* SMALL PHONES */
+
         @media (max-width: 380px) {
+          .bs-game-stage {
+            height: min(68svh, 470px) !important;
+            min-height: 320px;
+          }
+
           .bs-topbar {
-            gap: 5px;
-            padding: 6px;
+            gap: 4px;
+            padding: 5px;
           }
 
           .bs-topbar .bs-btn {
+            min-height: 35px;
             font-size: 10px;
-            padding: 6px 3px;
+            padding: 5px 2px;
           }
 
           .bs-controls {
-            gap: 6px;
-            padding: 6px;
+            gap: 5px;
+            padding: 5px;
           }
 
           .bs-controls .bs-btn {
-            min-height: 56px;
+            min-height: 50px;
           }
 
           .bs-game-info span {
@@ -1932,8 +2032,6 @@ export default function GameCanvas({
           {worldName}
         </div>
 
-        {/* MOBILE TOUCH GUIDE */}
-
         <div className="bs-touch-hint">
           👆 DRAG TO AIM • RELEASE TO SHOOT
         </div>
@@ -1954,6 +2052,7 @@ export default function GameCanvas({
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerCancel}
+          onLostPointerCapture={handlePointerCancel}
           style={{
             position: "absolute",
             inset: 0,
@@ -1965,6 +2064,7 @@ export default function GameCanvas({
             background: "transparent",
             userSelect: "none",
             WebkitUserSelect: "none",
+            WebkitTapHighlightColor: "transparent",
           }}
         />
 
