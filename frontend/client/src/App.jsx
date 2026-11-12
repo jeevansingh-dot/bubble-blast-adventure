@@ -1,7 +1,8 @@
 
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
 
 import BubbleBackground from "./components/BubbleBackground.jsx";
+import GameScene3D from "./components/GameScene3D.jsx";
 import Navbar from "./components/Navbar.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 
@@ -15,7 +16,6 @@ import LeaderboardPage from "./pages/LeaderboardPage.jsx";
 import AchievementsPage from "./pages/AchievementsPage.jsx";
 import ProfilePage from "./pages/ProfilePage.jsx";
 import NotFoundPage from "./pages/NotFoundPage.jsx";
-
 import SettingsPage from "./pages/SettingsPage.jsx";
 
 const guard = (page) => (
@@ -23,9 +23,19 @@ const guard = (page) => (
 );
 
 export default function App() {
+  const location = useLocation();
+
+  const isGameRoute = location.pathname.startsWith("/game/");
+
   return (
     <>
-      <BubbleBackground />
+      {!isGameRoute && <BubbleBackground />}
+
+      {isGameRoute && (
+        <div className="game-3d-background">
+          <GameScene3D />
+        </div>
+      )}
 
       <div
         style={{
@@ -56,11 +66,11 @@ export default function App() {
               path="/dashboard"
               element={guard(<DashboardPage />)}
             />
-            
-<Route
-  path="/settings"
-  element={guard(<SettingsPage />)}
-/>
+
+            <Route
+              path="/settings"
+              element={guard(<SettingsPage />)}
+            />
 
             <Route
               path="/levels"

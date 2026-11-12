@@ -1,203 +1,270 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
+
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext.jsx";
+import { progressFromUser } from "../utils/progress.js";
+
+const worlds = [
+  {
+    icon: "🌳",
+    name: "Emerald Forest",
+    levels: "01 — 10",
+    tone: "forest",
+    note: "The adventure begins",
+  },
+  {
+    icon: "❄️",
+    name: "Frosty Peaks",
+    levels: "11 — 20",
+    tone: "ice",
+    note: "Chill bubbles await",
+  },
+  {
+    icon: "🌋",
+    name: "Lava Kingdom",
+    levels: "21 — 30",
+    tone: "lava",
+    note: "A hotter challenge",
+  },
+  {
+    icon: "🚀",
+    name: "Cosmic Galaxy",
+    levels: "31 — 40",
+    tone: "space",
+    note: "The final frontier",
+  },
+];
 
 export default function HomePage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+
+  const progress = progressFromUser(user);
+
+  const completed = Object.values(progress.stars).filter(
+    (n) => Number(n) > 0
+  ).length;
+
+  const stars = Object.values(progress.stars).reduce(
+    (sum, n) => sum + Number(n || 0),
+    0
+  );
+
+  const nextLevel = Math.min(40, completed + 1);
+
+  const play = () => {
+    navigate(user ? `/game/${nextLevel}` : "/register");
+  };
+
+  const explore = () => {
+    navigate(user ? "/levels" : "/login");
+  };
 
   return (
-    <div style={{
-      minHeight: 'calc(100vh - 70px)',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '40px 20px',
-      position: 'relative',
-      overflow: 'hidden'
-    }}>
+    <div className="home-shell">
+      <section className="hero-stage">
+        <div className="hero-copy">
+          <div className="eyebrow">
+            <span className="eyebrow-dot" />
+            THE BUBBLY ADVENTURE STARTS HERE
+          </div>
 
-      {/* 3D Background Glowing Mesh Spheres */}
-      <div style={{
-        position: 'absolute', width: '500px', height: '500px',
-        background: 'radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, rgba(0,0,0,0) 70%)',
-        top: '-10%', left: '15%', borderRadius: '50%', filter: 'blur(80px)', pointerEvents: 'none'
-      }}></div>
-      <div style={{
-        position: 'absolute', width: '500px', height: '500px',
-        background: 'radial-gradient(circle, rgba(236, 72, 153, 0.2) 0%, rgba(0,0,0,0) 70%)',
-        bottom: '-10%', right: '15%', borderRadius: '50%', filter: 'blur(80px)', pointerEvents: 'none'
-      }}></div>
+          <h1>
+            POP YOUR WAY
+            <br />
+            <span>TO THE TOP!</span>
+          </h1>
 
-      {/* Main 3D Arcade Glass Stage */}
-      <div className="arcade-card-3d" style={{
-        position: 'relative',
-        zIndex: 1,
-        maxWidth: '780px',
-        width: '100%',
-        borderRadius: '36px',
-        padding: '55px 35px 45px 35px',
-        textAlign: 'center'
-      }}>
+          <p className="hero-lede">
+            Aim, match and blast your way through magical worlds.
+            Can you rescue every little bubble buddy?
+          </p>
 
-        {/* Floating 3D Chick Sphere */}
-        <div style={{
-          width: '100px',
-          height: '100px',
-          margin: '0 auto 28px auto',
-          background: 'radial-gradient(circle at 35% 35%, #fef08a 0%, #f59e0b 60%, #b45309 100%)',
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '52px',
-          boxShadow: `
-            0 15px 35px rgba(245, 158, 11, 0.6),
-            inset -6px -6px 12px rgba(180, 83, 9, 0.8),
-            inset 6px 6px 12px rgba(255, 255, 255, 0.8)
-          `,
-          animation: 'float3D 3.5s ease-in-out infinite'
-        }}>
-          🐥
-        </div>
-
-        {/* 3D Extruded Metallic Glowing Header */}
-        <h1 style={{
-          fontSize: 'clamp(34px, 5.5vw, 56px)',
-          fontWeight: '900',
-          color: '#ffffff',
-          margin: '0 0 12px 0',
-          letterSpacing: '2px',
-          textTransform: 'uppercase',
-          textShadow: `
-            0 1px 0 #94a3b8,
-            0 2px 0 #64748b,
-            0 3px 0 #475569,
-            0 4px 0 #334155,
-            0 5px 10px rgba(0, 0, 0, 0.8),
-            0 0 30px rgba(6, 182, 212, 0.6)
-          `
-        }}>
-          BUBBLE <span style={{ 
-            color: '#38bdf8',
-            textShadow: '0 0 25px rgba(56, 189, 248, 0.8), 0 4px 0 #0284c7'
-          }}>BLAST</span> ADVENTURE
-        </h1>
-
-        <p style={{
-          fontSize: '16px',
-          color: '#cbd5e1',
-          margin: '0 auto 32px auto',
-          fontWeight: '500',
-          maxWidth: '520px',
-          textShadow: '0 2px 4px rgba(0,0,0,0.6)'
-        }}>
-          Aim. Match. Pop. Rescue the trapped baby chicks across vibrant arcade worlds!
-        </p>
-
-        {/* 3D Pill Badges */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          gap: '14px',
-          flexWrap: 'wrap',
-          marginBottom: '40px'
-        }}>
-          {[
-            { label: '🎯 Precision Aim', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.12)', border: '#38bdf8' },
-            { label: '💥 Combo Pops', color: '#f472b6', bg: 'rgba(244, 114, 182, 0.12)', border: '#f472b6' },
-            { label: '🐥 Chick Rescue', color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.12)', border: '#fbbf24' }
-          ].map((pill, idx) => (
-            <span key={idx} style={{
-              background: pill.bg,
-              border: `1px solid ${pill.border}`,
-              padding: '8px 18px',
-              borderRadius: '24px',
-              fontSize: '13px',
-              fontWeight: '700',
-              color: pill.color,
-              boxShadow: '0 4px 15px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.2)'
-            }}>
-              {pill.label}
-            </span>
-          ))}
-        </div>
-
-        {/* Heavy 3D Arcade Play Button */}
-        <button
-          onClick={() => navigate('/levels')}
-          style={{
-            background: 'linear-gradient(180deg, #ec4899 0%, #be185d 100%)',
-            color: '#ffffff',
-            border: 'none',
-            padding: '18px 56px',
-            fontSize: '20px',
-            fontWeight: '900',
-            borderRadius: '22px',
-            cursor: 'pointer',
-            letterSpacing: '1.5px',
-            textTransform: 'uppercase',
-            boxShadow: `
-              0 12px 0 #831843,
-              0 20px 30px rgba(236, 72, 153, 0.5),
-              inset 0 2px 3px rgba(255, 255, 255, 0.6)
-            `,
-            transition: 'all 0.15s ease',
-            outline: 'none'
-          }}
-          onMouseDown={(e) => {
-            e.currentTarget.style.transform = 'translateY(6px)';
-            e.currentTarget.style.boxShadow = '0 6px 0 #831843, 0 10px 15px rgba(236, 72, 153, 0.5)';
-          }}
-          onMouseUp={(e) => {
-            e.currentTarget.style.transform = 'translateY(0px)';
-            e.currentTarget.style.boxShadow = '0 12px 0 #831843, 0 20px 30px rgba(236, 72, 153, 0.5), inset 0 2px 3px rgba(255, 255, 255, 0.6)';
-          }}
-        >
-          🚀 PLAY NOW
-        </button>
-
-        {/* 3D Interactive Bottom Cards */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-          gap: '16px',
-          marginTop: '45px',
-          borderTop: '1px solid rgba(255, 255, 255, 0.1)',
-          paddingTop: '32px'
-        }}>
-          {[
-            { icon: '🗺️', title: '40+ Levels', desc: 'Arcade Stages' },
-            { icon: '💣', title: 'Boosters', desc: 'Explosive Power' },
-            { icon: '🔄', title: 'Swap Bubble', desc: 'Tactical Play' },
-            { icon: '🏆', title: 'Leaderboard', desc: 'Global Ranks' }
-          ].map((item, idx) => (
-            <div key={idx} style={{
-              background: 'linear-gradient(145deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '20px',
-              padding: '18px 12px',
-              textAlign: 'center',
-              boxShadow: '0 8px 20px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,0.1)',
-              transition: 'transform 0.2s ease'
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.transform = 'translateY(-4px)'}
-            onMouseLeave={(e) => e.currentTarget.style.transform = 'translateY(0)'}
+          <div className="hero-actions">
+            <button
+              className="game-button game-button-primary"
+              onClick={play}
             >
-              <span style={{ fontSize: '28px', display: 'block', marginBottom: '8px', filter: 'drop-shadow(0 4px 6px rgba(0,0,0,0.4))' }}>
-                {item.icon}
-              </span>
-              <h4 style={{ margin: '0 0 2px 0', fontSize: '14px', fontWeight: '800', color: '#f8fafc' }}>
-                {item.title}
-              </h4>
-              <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '500' }}>
-                {item.desc}
-              </span>
+              <span>▶</span>
+              {user ? "CONTINUE ADVENTURE" : "PLAY NOW"}
+            </button>
+
+            <button
+              className="game-button game-button-ghost"
+              onClick={explore}
+            >
+              EXPLORE WORLDS
+            </button>
+          </div>
+
+          <div className="hero-stats">
+            <div>
+              <strong>40</strong>
+              <span>LEVELS</span>
             </div>
-          ))}
+
+            <div>
+              <strong>4</strong>
+              <span>MAGICAL WORLDS</span>
+            </div>
+
+            <div>
+              <strong>★ {stars}</strong>
+              <span>YOUR STARS</span>
+            </div>
+          </div>
         </div>
 
-      </div>
+        <div
+          className="hero-art"
+          aria-label="Colorful bubble adventure illustration"
+        >
+          <div className="art-orbit orbit-one" />
+          <div className="art-orbit orbit-two" />
 
+          <div className="art-cloud cloud-one" />
+          <div className="art-cloud cloud-two" />
+
+          <div className="art-island">
+            <div className="island-tree tree-one">🌴</div>
+            <div className="island-tree tree-two">🌳</div>
+            <div className="island-rock">🪨</div>
+            <div className="island-ground" />
+            <div className="island-water" />
+          </div>
+
+          <div className="mascot-orb">
+            <span>🐥</span>
+            <i />
+          </div>
+
+          <div className="hero-bubble bubble-a">🔵</div>
+          <div className="hero-bubble bubble-b">🟣</div>
+          <div className="hero-bubble bubble-c">🟡</div>
+          <div className="hero-bubble bubble-d">🟢</div>
+
+          <div className="art-spark spark-a">✦</div>
+          <div className="art-spark spark-b">✧</div>
+
+          <div className="art-label">
+            <span>✨</span> WORLD 1: FOREST
+          </div>
+        </div>
+      </section>
+
+      {user && (
+        <section className="player-strip">
+          <div className="player-welcome">
+            <div className="player-avatar">🎮</div>
+
+            <div>
+              <span>WELCOME BACK</span>
+              <strong>
+                {user.username || user.name || "Player"}
+              </strong>
+            </div>
+          </div>
+
+          <div className="player-progress">
+            <div className="progress-label">
+              <span>Adventure progress</span>
+              <strong>{completed}/40 levels</strong>
+            </div>
+
+            <div className="progress-track">
+              <i
+                style={{
+                  width: `${(completed / 40) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
+
+          <button
+            className="text-action"
+            onClick={() => navigate("/dashboard")}
+          >
+            MY DASHBOARD ↗
+          </button>
+        </section>
+      )}
+
+      <section className="world-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">
+              CHOOSE YOUR DESTINATION
+            </span>
+            <h2>EXPLORE THE WORLDS</h2>
+          </div>
+
+          <button
+            className="text-action"
+            onClick={explore}
+          >
+            VIEW ALL LEVELS ↗
+          </button>
+        </div>
+
+        <div className="world-grid">
+          {worlds.map((world, index) => (
+            <button
+              className={`world-card world-${world.tone}`}
+              key={world.name}
+              onClick={explore}
+            >
+              <span className="world-number">
+                WORLD 0{index + 1}
+              </span>
+
+              <span className="world-emoji">
+                {world.icon}
+              </span>
+
+              <strong>{world.name}</strong>
+
+              <span className="world-note">
+                {world.note}
+              </span>
+
+              <span className="world-levels">
+                {world.levels} <b>→</b>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="feature-ribbon">
+        <div>
+          <span>💥</span>
+          <strong>EPIC COMBOS</strong>
+          <small>Chain pops for big scores</small>
+        </div>
+
+        <div>
+          <span>🧨</span>
+          <strong>POWER BOOSTERS</strong>
+          <small>Blast through tricky boards</small>
+        </div>
+
+        <div>
+          <span>🏆</span>
+          <strong>COLLECT STARS</strong>
+          <small>Master every level</small>
+        </div>
+
+        <div>
+          <span>🐣</span>
+          <strong>RESCUE BUDDIES</strong>
+          <small>Little friends need you</small>
+        </div>
+      </section>
+
+      <footer className="game-footer">
+        BUBBLE BLAST ADVENTURE
+        <span>•</span>
+        POP. PLAY. REPEAT.
+      </footer>
     </div>
   );
 }

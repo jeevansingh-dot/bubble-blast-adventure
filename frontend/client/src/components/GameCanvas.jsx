@@ -1,5 +1,11 @@
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   boardFromLayout,
@@ -9,20 +15,26 @@ import {
 
 import { traceShot } from "../game/collision.js";
 import { resolveShot } from "../game/shotResolver.js";
+
 import {
   calculateShotScore,
   calculateStars,
 } from "../game/scoreManager.js";
+
 import {
   isObjectiveComplete,
   countBubbles,
 } from "../game/objectiveManager.js";
+
 import { pickColor } from "../game/bubbleQueue.js";
 import { makeRng } from "../game/rng.js";
+
 import {
   BOARD_WIDTH,
   BUBBLE_RADIUS,
 } from "../game/constants.js";
+
+import GameBoard3D from "./GameBoard3D.jsx";
 
 const W = BOARD_WIDTH;
 const H = 600;
@@ -52,33 +64,76 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+// =====================================
+// PREMIUM GLASS BUBBLE
+// =====================================
+
 function drawBubble(ctx, x, y, color, radius = R) {
   if (!color) return;
 
   const fill = COLOR_MAP[color] || color;
 
+  ctx.save();
+
+  ctx.shadowColor = fill;
+  ctx.shadowBlur = 18;
+
   const gradient = ctx.createRadialGradient(
-    x - 6, y - 6, 2, x, y, radius
+    x - radius * 0.35,
+    y - radius * 0.4,
+    1,
+    x,
+    y,
+    radius
   );
 
   gradient.addColorStop(0, "#ffffff");
-  gradient.addColorStop(0.2, fill);
-  gradient.addColorStop(1, fill);
+  gradient.addColorStop(0.22, fill);
+  gradient.addColorStop(0.78, fill);
+  gradient.addColorStop(1, "#10152d");
 
-  ctx.save();
-  ctx.shadowColor = fill;
-  ctx.shadowBlur = 8;
   ctx.beginPath();
   ctx.arc(x, y, radius - 1, 0, Math.PI * 2);
   ctx.fillStyle = gradient;
   ctx.fill();
-  ctx.restore();
+
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = "rgba(255,255,255,.65)";
+  ctx.stroke();
 
   ctx.beginPath();
-  ctx.arc(x - 5, y - 6, 3, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(255,255,255,.65)";
+  ctx.ellipse(
+    x - radius * 0.28,
+    y - radius * 0.35,
+    radius * 0.25,
+    radius * 0.13,
+    -0.5,
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fillStyle = "rgba(255,255,255,.85)";
   ctx.fill();
+
+  ctx.beginPath();
+  ctx.arc(
+    x + radius * 0.35,
+    y + radius * 0.25,
+    Math.max(1.5, radius * 0.08),
+    0,
+    Math.PI * 2
+  );
+
+  ctx.fillStyle = "rgba(255,255,255,.7)";
+  ctx.fill();
+
+  ctx.restore();
 }
+
+// =====================================
+// GAME CREATION
+// =====================================
 
 function createGame(level, seed) {
   const board = boardFromLayout(level.layout);
@@ -98,7 +153,10 @@ function createGame(level, seed) {
     angle: Math.PI / 2,
     swappedSinceShot: false,
     shotsHistory: [],
-    boosters: { bomb: 2, rainbow: 2 },
+    boosters: {
+      bomb: 2,
+      rainbow: 2,
+    },
     armed: null,
     status: "READY",
     level,
@@ -107,6 +165,10 @@ function createGame(level, seed) {
     paused: false,
   };
 }
+
+// =====================================
+// MAIN GAME COMPONENT
+// =====================================
 
 export default function GameCanvas({
   levelId = 1,
@@ -124,20 +186,81 @@ export default function GameCanvas({
   onExit = null,
   onLevelsClick = null,
 }) {
-  const actualLevel = level || {
-    id: levelId,
-    layout: [],
-    shots: 20,
-    objective: { type: "clear_all" },
-    starThresholds: [200, 400, 600],
-  };
+  const actualLevel = useMemo(
+    () =>
+      level || {
+        id: levelId,
+        layout: [],
+        shots: 20,
+        objective: {
+          type: "clear_all",
+        },
+        starThresholds: [200, 400, 600],
+      },
+    [level, levelId]
+  );
+
+  const starThresholds = useMemo(
+    () => actualLevel.starThresholds || [200, 400, 600],
+    [actualLevel.starThresholds]
+  );
+
+  // WORLD THEME
+
+  const currentLevelId = Number(actualLevel.id || levelId || 1);
+
+  const worldBackground =
+    currentLevelId <= 5
+      ? "#06251f"
+      : currentLevelId <= 10
+      ? "#031d3b"
+      : currentLevelId <= 20
+      ? "#171044"
+      : currentLevelId <= 30
+      ? "#10283d"
+      : currentLevelId <= 35
+      ? "#310d12"
+      : "#160b35";
+
+  const worldGlow =
+    currentLevelId <= 5
+      ? "#10b981"
+      : currentLevelId <= 10
+      ? "#0284c7"
+      : currentLevelId <= 20
+      ? "#6366f1"
+      : currentLevelId <= 30
+      ? "#0891b2"
+      : currentLevelId <= 35
+      ? "#ea580c"
+      : "#9333ea";
+
+  const worldName =
+    currentLevelId <= 5
+      ? "MAGICAL GARDEN"
+      : currentLevelId <= 10
+      ? "UNDERWATER OCEAN"
+      : currentLevelId <= 20
+      ? "FANTASY VALLEY"
+      : currentLevelId <= 30
+      ? "ICY PEAKS"
+      : currentLevelId <= 35
+      ? "LAVA VOLCANO"
+      : "COSMIC GALAXY";
+
+  // REFS
 
   const canvasRef = useRef(null);
   const gameRef = useRef(null);
+
   const finishReportedRef = useRef(false);
   const animationRef = useRef(null);
+
   const shotLockRef = useRef(false);
   const pointerDownRef = useRef(false);
+
+  // Mobile touch protection
+  const activePointerIdRef = useRef(null);
 
   const audioContextRef = useRef(null);
   const musicTimerRef = useRef(null);
@@ -146,11 +269,25 @@ export default function GameCanvas({
   const onFinishRef = useRef(onFinish);
   onFinishRef.current = onFinish;
 
+  // STATE
+
   const [hud, setHud] = useState(null);
+
+  const [sceneState, setSceneState] = useState({
+    board: [],
+    current: null,
+    angle: Math.PI / 2,
+    effects: [],
+  });
+
   const [paused, setPaused] = useState(false);
   const [message, setMessage] = useState("");
   const [settings, setSettings] = useState(false);
   const [sound, setSound] = useState(true);
+  const [hintCount, setHintCount] = useState(3);
+
+  const [showWorldTransition, setShowWorldTransition] = useState(true);
+  const [transitionVisible, setTransitionVisible] = useState(true);
 
   const [bestScore, setBestScore] = useState(() => {
     try {
@@ -160,12 +297,9 @@ export default function GameCanvas({
     }
   });
 
-  const [hintCount, setHintCount] = useState(3);
-
-  const starThresholds =
-    actualLevel.starThresholds || [200, 400, 600];
-
+  // =====================================
   // AUDIO
+  // =====================================
 
   const getAudioContext = useCallback(() => {
     const AudioContextClass =
@@ -197,12 +331,14 @@ export default function GameCanvas({
       const gain = ctx.createGain();
 
       oscillator.type = type;
+
       oscillator.frequency.setValueAtTime(
         frequency,
         ctx.currentTime
       );
 
       gain.gain.setValueAtTime(volume, ctx.currentTime);
+
       gain.gain.exponentialRampToValueAtTime(
         0.001,
         ctx.currentTime + duration
@@ -223,7 +359,8 @@ export default function GameCanvas({
 
   const playPopSound = useCallback(() => {
     playTone(700, 0.1, "sine", 0.07);
-    setTimeout(() => {
+
+    window.setTimeout(() => {
       playTone(950, 0.12, "sine", 0.05);
     }, 65);
   }, [playTone]);
@@ -232,13 +369,19 @@ export default function GameCanvas({
     if (!sound || musicTimerRef.current) return;
 
     const notes = [
-      523.25, 659.25, 783.99, 659.25,
-      587.33, 698.46, 880, 698.46,
+      523.25,
+      659.25,
+      783.99,
+      659.25,
+      587.33,
+      698.46,
+      880,
+      698.46,
     ];
 
     getAudioContext();
 
-    musicTimerRef.current = setInterval(() => {
+    musicTimerRef.current = window.setInterval(() => {
       if (!sound) return;
 
       playTone(
@@ -252,12 +395,14 @@ export default function GameCanvas({
 
   const stopMusic = useCallback(() => {
     if (musicTimerRef.current) {
-      clearInterval(musicTimerRef.current);
+      window.clearInterval(musicTimerRef.current);
       musicTimerRef.current = null;
     }
   }, []);
 
+  // =====================================
   // DRAW
+  // =====================================
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -266,26 +411,30 @@ export default function GameCanvas({
     if (!canvas || !g) return;
 
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
     ctx.clearRect(0, 0, W, H);
 
-    ctx.fillStyle = "rgba(255,255,255,.35)";
+    const now = performance.now();
+
+    // Background particles
 
     for (let i = 0; i < 30; i++) {
-      ctx.fillRect(
-        (i * 83 + 19) % W,
-        (i * 47 + 13) % H,
-        1.5,
-        1.5
-      );
+      const x = (i * 83 + 19) % W;
+      const y = (i * 47 + 13) % H;
+
+      const alpha =
+        0.18 + Math.sin(now * 0.0015 + i) * 0.12;
+
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+
+      ctx.beginPath();
+      ctx.arc(x, y, 1.1, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    // Board
-    forEachBubble(g.board, (bubble, r, c) => {
-      const pos = cellToPixel(r, c);
-      drawBubble(ctx, pos.x, pos.y, bubble.color);
-    });
+    // AIM TRAJECTORY
 
-    // Aim line remains active during flight
     if (g.status === "READY" && !g.paused) {
       const trajectory = traceShot(
         g.board,
@@ -294,48 +443,142 @@ export default function GameCanvas({
         g.angle
       );
 
-      if (trajectory.path.length > 1) {
-        ctx.beginPath();
-        ctx.moveTo(
-          trajectory.path[0].x,
-          trajectory.path[0].y
-        );
+      if (trajectory?.path?.length > 1) {
+        const points = trajectory.path;
 
-        trajectory.path.forEach((point) => {
+        ctx.save();
+
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+
+        points.forEach((point) => {
           ctx.lineTo(point.x, point.y);
         });
 
-        ctx.strokeStyle = "rgba(255,255,255,.45)";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 6]);
+        ctx.strokeStyle = "rgba(56,189,248,.22)";
+        ctx.lineWidth = 7;
+        ctx.shadowColor = "#38bdf8";
+        ctx.shadowBlur = 15;
         ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+
+        points.forEach((point) => {
+          ctx.lineTo(point.x, point.y);
+        });
+
+        ctx.strokeStyle = "rgba(255,255,255,.85)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 8]);
+        ctx.lineDashOffset = -(now * 0.025);
+        ctx.shadowBlur = 0;
+        ctx.stroke();
+
         ctx.setLineDash([]);
+
+        const target = points[points.length - 1];
+
+        ctx.beginPath();
+        ctx.arc(
+          target.x,
+          target.y,
+          5 + Math.sin(now * 0.008) * 1.5,
+          0,
+          Math.PI * 2
+        );
+
+        ctx.strokeStyle = "rgba(255,255,255,.9)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.restore();
       }
     }
 
-    // Flying bubble
+    // FLYING BUBBLE
+
     if (g.flyingBubble) {
       const b = g.flyingBubble;
 
       const progress = clamp(
-        (performance.now() - b.start) / b.duration,
+        (now - b.start) / b.duration,
         0,
         1
       );
 
       const eased = 1 - Math.pow(1 - progress, 3);
 
+      const currentX =
+        b.startX + (b.endX - b.startX) * eased;
+
+      const currentY =
+        b.startY + (b.endY - b.startY) * eased;
+
+      const fill = COLOR_MAP[b.color] || b.color;
+
+      const trailGradient = ctx.createLinearGradient(
+        b.startX,
+        b.startY,
+        currentX,
+        currentY
+      );
+
+      trailGradient.addColorStop(0, "rgba(255,255,255,0)");
+      trailGradient.addColorStop(0.65, `${fill}33`);
+      trailGradient.addColorStop(1, `${fill}cc`);
+
+      ctx.save();
+
+      ctx.beginPath();
+      ctx.moveTo(b.startX, b.startY);
+      ctx.lineTo(currentX, currentY);
+
+      ctx.strokeStyle = trailGradient;
+      ctx.lineWidth = R * 0.85;
+      ctx.lineCap = "round";
+      ctx.shadowColor = fill;
+      ctx.shadowBlur = 15;
+      ctx.stroke();
+
+      for (let i = 1; i <= 5; i++) {
+        const t = i / 6;
+
+        const particleX =
+          b.startX + (currentX - b.startX) * t;
+
+        const particleY =
+          b.startY + (currentY - b.startY) * t;
+
+        ctx.beginPath();
+
+        ctx.arc(
+          particleX,
+          particleY,
+          Math.max(1, 3 * (1 - t)),
+          0,
+          Math.PI * 2
+        );
+
+        ctx.fillStyle = `${fill}99`;
+        ctx.fill();
+      }
+
+      ctx.restore();
+
+      const pulse =
+        1 + Math.sin(progress * Math.PI) * 0.12;
+
       drawBubble(
         ctx,
-        b.startX + (b.endX - b.startX) * eased,
-        b.startY + (b.endY - b.startY) * eased,
+        currentX,
+        currentY,
         b.color,
-        R
+        R * pulse
       );
     }
 
-    // Removed bubble effects
-    const now = performance.now();
+    // REMOVED BUBBLE EFFECTS
 
     g.effects = g.effects.filter((effect) => {
       const progress =
@@ -363,45 +606,25 @@ export default function GameCanvas({
       );
 
       ctx.globalAlpha = 1;
+
       return true;
     });
 
-    // Launcher
-    ctx.save();
-    ctx.translate(LAUNCHER_X, LAUNCHER_Y);
-    ctx.rotate(-g.angle);
-    ctx.fillStyle = "#7dd3fc";
-    ctx.fillRect(0, -7, 38, 14);
-    ctx.restore();
+    // DANGER LINE
 
-    ctx.beginPath();
-    ctx.arc(LAUNCHER_X, LAUNCHER_Y, 22, 0, Math.PI * 2);
-    ctx.fillStyle = "#0f172a";
-    ctx.fill();
-
-    ctx.strokeStyle = g.armed ? "#fbbf24" : "#38bdf8";
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    drawBubble(
-      ctx,
-      LAUNCHER_X,
-      LAUNCHER_Y,
-      g.armed || g.current,
-      15
-    );
-
-    // Danger line
     ctx.beginPath();
     ctx.moveTo(0, H - 115);
     ctx.lineTo(W, H - 115);
+
     ctx.strokeStyle = "rgba(248,113,113,.5)";
     ctx.setLineDash([4, 5]);
     ctx.stroke();
     ctx.setLineDash([]);
   }, []);
 
-  // HUD
+  // =====================================
+  // SYNC GAME STATE
+  // =====================================
 
   const sync = useCallback(() => {
     const g = gameRef.current;
@@ -410,6 +633,7 @@ export default function GameCanvas({
     setHud({
       score: g.score,
       shots: g.shots,
+      remaining: countBubbles(g.board),
       combo: g.combo,
       bestCombo: g.bestCombo,
       current: g.current,
@@ -421,10 +645,27 @@ export default function GameCanvas({
     });
 
     setBestScore((old) => Math.max(old, g.score));
+
+    setSceneState({
+      board: g.board.map((row) =>
+        row.map((bubble) =>
+          bubble ? { ...bubble } : null
+        )
+      ),
+      current: g.armed || g.current,
+      angle: g.angle,
+      effects: g.effects.map((effect, index) => ({
+        ...effect,
+        id: `${effect.start}-${index}`,
+      })),
+    });
+
     draw();
   }, [draw, starThresholds]);
 
-  // FINISH
+  // =====================================
+  // FINISH GAME
+  // =====================================
 
   const finishGame = useCallback(
     (outcome) => {
@@ -437,6 +678,7 @@ export default function GameCanvas({
 
       shotLockRef.current = false;
       pointerDownRef.current = false;
+      activePointerIdRef.current = null;
 
       setPaused(false);
       stopMusic();
@@ -444,7 +686,7 @@ export default function GameCanvas({
       if (outcome === "WON") {
         playTone(783.99, 0.2, "sine", 0.08);
 
-        setTimeout(() => {
+        window.setTimeout(() => {
           playTone(1046.5, 0.3, "sine", 0.08);
         }, 180);
       }
@@ -464,9 +706,21 @@ export default function GameCanvas({
     [sync, stopMusic, playTone]
   );
 
+  // =====================================
+  // CHECK OBJECTIVE
+  // =====================================
+
   const checkObjective = useCallback(() => {
     const g = gameRef.current;
+
     if (!g || g.status !== "READY") return;
+
+    const remaining = countBubbles(g.board);
+
+    if (remaining === 0) {
+      finishGame("WON");
+      return;
+    }
 
     const completed = isObjectiveComplete(
       g.level.objective,
@@ -480,11 +734,6 @@ export default function GameCanvas({
 
     if (completed) {
       finishGame("WON");
-      return;
-    }
-
-    if (countBubbles(g.board) === 0) {
-      finishGame("LOST");
       return;
     }
 
@@ -505,31 +754,55 @@ export default function GameCanvas({
     }
   }, [finishGame]);
 
+  // =====================================
   // AIM
+  // =====================================
 
-  const aim = useCallback((event) => {
-    const g = gameRef.current;
-    const canvas = canvasRef.current;
+  const aim = useCallback(
+    (event) => {
+      const g = gameRef.current;
+      const canvas = canvasRef.current;
 
-    if (!g || !canvas || g.status !== "READY" || g.paused) {
-      return;
-    }
+      if (
+        !g ||
+        !canvas ||
+        g.status !== "READY" ||
+        g.paused ||
+        shotLockRef.current
+      ) {
+        return;
+      }
 
-    const rect = canvas.getBoundingClientRect();
+      const rect = canvas.getBoundingClientRect();
 
-    const x = ((event.clientX - rect.left) / rect.width) * W;
-    const y = ((event.clientY - rect.top) / rect.height) * H;
+      if (!rect.width || !rect.height) return;
 
-    const angle = Math.atan2(
-      LAUNCHER_Y - y,
-      x - LAUNCHER_X
-    );
+      const x =
+        ((event.clientX - rect.left) / rect.width) * W;
 
-    g.angle = clamp(angle, MIN_ANGLE, MAX_ANGLE);
-    draw();
-  }, [draw]);
+      const y =
+        ((event.clientY - rect.top) / rect.height) * H;
 
+      const angle = Math.atan2(
+        LAUNCHER_Y - y,
+        x - LAUNCHER_X
+      );
+
+      g.angle = clamp(angle, MIN_ANGLE, MAX_ANGLE);
+
+      setSceneState((prev) => ({
+        ...prev,
+        angle: g.angle,
+      }));
+
+      draw();
+    },
+    [draw]
+  );
+
+  // =====================================
   // SHOOT
+  // =====================================
 
   const shoot = useCallback(() => {
     const g = gameRef.current;
@@ -538,12 +811,11 @@ export default function GameCanvas({
       !g ||
       g.status !== "READY" ||
       g.paused ||
-      shotLockRef.current
+      shotLockRef.current ||
+      g.shots <= 0
     ) {
       return;
     }
-
-    if (g.shots <= 0) return;
 
     const special = g.armed;
 
@@ -559,12 +831,11 @@ export default function GameCanvas({
       angle
     );
 
-    if (!simulation.cell) return;
+    if (!simulation?.cell) return;
 
     const { r, c } = simulation.cell;
     const target = cellToPixel(r, c);
 
-    // Lock only firing, never aiming.
     shotLockRef.current = true;
 
     if (special) {
@@ -588,7 +859,6 @@ export default function GameCanvas({
     startMusic();
     playShootSound();
 
-    // Exact server replay record
     g.shotsHistory.push({
       angle,
       color,
@@ -601,9 +871,7 @@ export default function GameCanvas({
     g.shots--;
 
     const previousBoard = g.board.map((row) =>
-      row.map((bubble) =>
-        bubble ? { ...bubble } : null
-      )
+      row.map((bubble) => (bubble ? { ...bubble } : null))
     );
 
     const result = resolveShot(g.board, r, c, color);
@@ -612,7 +880,10 @@ export default function GameCanvas({
 
     previousBoard.forEach((row, rowIndex) => {
       row.forEach((bubble, colIndex) => {
-        if (!bubble || g.board[rowIndex]?.[colIndex]) {
+        if (
+          !bubble ||
+          g.board[rowIndex]?.[colIndex]
+        ) {
           return;
         }
 
@@ -651,22 +922,30 @@ export default function GameCanvas({
 
     setMessage(
       result.matched
-        ? `✨ +${calculateShotScore(result, Math.max(g.combo, 1))} POINTS!`
+        ? `✨ +${calculateShotScore(
+            result,
+            Math.max(g.combo, 1)
+          )} POINTS!`
         : "Keep trying!"
     );
 
     sync();
 
-    // Unlock after the travel animation.
     window.setTimeout(() => {
       if (gameRef.current === g) {
         g.flyingBubble = null;
         shotLockRef.current = false;
+
         sync();
+        checkObjective();
       }
     }, 235);
 
-    checkObjective();
+    window.setTimeout(() => {
+      if (gameRef.current === g) {
+        sync();
+      }
+    }, 800);
   }, [
     checkObjective,
     sync,
@@ -675,26 +954,144 @@ export default function GameCanvas({
     playPopSound,
   ]);
 
+  // =====================================
+  // MOBILE + DESKTOP POINTER CONTROLS
+  // =====================================
+
+  const handlePointerDown = useCallback(
+    (event) => {
+      if (event.button !== undefined && event.button !== 0) {
+        return;
+      }
+
+      const g = gameRef.current;
+
+      if (
+        !g ||
+        g.status !== "READY" ||
+        g.paused ||
+        shotLockRef.current
+      ) {
+        return;
+      }
+
+      // Prevent multiple fingers controlling the game
+      if (activePointerIdRef.current !== null) {
+        return;
+      }
+
+      event.preventDefault();
+
+      activePointerIdRef.current = event.pointerId;
+      pointerDownRef.current = true;
+
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {}
+
+      aim(event);
+    },
+    [aim]
+  );
+
+  const handlePointerMove = useCallback(
+    (event) => {
+      // Only active finger can control mobile aiming
+      if (
+        event.pointerType === "touch" &&
+        (!pointerDownRef.current ||
+          activePointerIdRef.current !== event.pointerId)
+      ) {
+        return;
+      }
+
+      // Ignore other active pointers
+      if (
+        pointerDownRef.current &&
+        activePointerIdRef.current !== event.pointerId
+      ) {
+        return;
+      }
+
+      // Desktop mouse can aim by moving
+      aim(event);
+    },
+    [aim]
+  );
+
+  const handlePointerUp = useCallback(
+    (event) => {
+      if (
+        !pointerDownRef.current ||
+        activePointerIdRef.current !== event.pointerId
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+
+      aim(event);
+
+      pointerDownRef.current = false;
+      activePointerIdRef.current = null;
+
+      try {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+      } catch {}
+
+      shoot();
+    },
+    [aim, shoot]
+  );
+
+  const handlePointerCancel = useCallback(
+    (event) => {
+      if (
+        activePointerIdRef.current !== null &&
+        event.pointerId !== activePointerIdRef.current
+      ) {
+        return;
+      }
+
+      pointerDownRef.current = false;
+      activePointerIdRef.current = null;
+    },
+    []
+  );
+
+  // =====================================
   // BOOSTERS
+  // =====================================
 
-  const toggleBooster = useCallback((type) => {
-    const g = gameRef.current;
+  const toggleBooster = useCallback(
+    (type) => {
+      const g = gameRef.current;
 
-    if (
-      !g ||
-      g.status !== "READY" ||
-      g.paused ||
-      shotLockRef.current
-    ) return;
+      if (
+        !g ||
+        g.status !== "READY" ||
+        g.paused ||
+        shotLockRef.current
+      ) {
+        return;
+      }
 
-    if (g.armed === type) {
-      g.armed = null;
-    } else if (g.boosters[type] > 0) {
-      g.armed = type;
-    }
+      if (g.armed === type) {
+        g.armed = null;
+      } else if (g.boosters[type] > 0) {
+        g.armed = type;
+      }
 
-    sync();
-  }, [sync]);
+      sync();
+    },
+    [sync]
+  );
+
+  // =====================================
+  // SWAP
+  // =====================================
 
   const swap = useCallback(() => {
     const g = gameRef.current;
@@ -705,21 +1102,27 @@ export default function GameCanvas({
       g.paused ||
       g.armed ||
       shotLockRef.current
-    ) return;
+    ) {
+      return;
+    }
 
     [g.current, g.next] = [g.next, g.current];
+
     g.swappedSinceShot = !g.swappedSinceShot;
 
     sync();
   }, [sync]);
 
+  // =====================================
   // RESTART
+  // =====================================
 
   const restart = useCallback(() => {
     stopMusic();
 
     shotLockRef.current = false;
     pointerDownRef.current = false;
+    activePointerIdRef.current = null;
 
     if (onRestart) {
       finishReportedRef.current = false;
@@ -727,49 +1130,89 @@ export default function GameCanvas({
       return;
     }
 
-    gameRef.current = createGame(actualLevel, seed);
+    gameRef.current = createGame(
+      actualLevel,
+      seed ?? Date.now()
+    );
+
     finishReportedRef.current = false;
 
     setPaused(false);
     setMessage("");
+
     sync();
   }, [actualLevel, onRestart, seed, sync, stopMusic]);
 
+  // =====================================
   // PAUSE
+  // =====================================
 
   const togglePause = useCallback(() => {
     const g = gameRef.current;
+
     if (!g || g.status !== "READY") return;
 
     g.paused = !g.paused;
+
     setPaused(g.paused);
 
     if (g.paused) {
       stopMusic();
+
+      pointerDownRef.current = false;
+      activePointerIdRef.current = null;
     }
 
     draw();
   }, [draw, stopMusic]);
 
+  // =====================================
   // HINT
+  // =====================================
 
   const hint = useCallback(() => {
     if (hintCount <= 0) return;
 
     setHintCount((n) => n - 1);
-    setMessage("💡 Aim carefully at matching bubbles!");
+
+    setMessage(
+      "💡 Aim at bubbles matching your current colour!"
+    );
   }, [hintCount]);
 
+  // =====================================
   // INITIALIZE
+  // =====================================
 
   useEffect(() => {
-    if (!actualLevel.layout?.length || seed == null) return;
+    if (!actualLevel.layout?.length) {
+      console.error(
+        "Game level layout is empty. Check the level data passed to GameCanvas.",
+        actualLevel
+      );
 
-    gameRef.current = createGame(actualLevel, seed);
+      gameRef.current = null;
+      setHud(null);
+
+      setSceneState({
+        board: [],
+        current: null,
+        angle: Math.PI / 2,
+        effects: [],
+      });
+
+      return;
+    }
+
+    gameRef.current = createGame(
+      actualLevel,
+      seed ?? Date.now()
+    );
+
     finishReportedRef.current = false;
-
     shotLockRef.current = false;
     pointerDownRef.current = false;
+    activePointerIdRef.current = null;
 
     setPaused(false);
     setMessage("");
@@ -779,10 +1222,36 @@ export default function GameCanvas({
     return () => {
       gameRef.current = null;
       shotLockRef.current = false;
+      pointerDownRef.current = false;
+      activePointerIdRef.current = null;
     };
   }, [actualLevel, seed, sync]);
 
+  // =====================================
+  // CINEMATIC WORLD TRANSITION
+  // =====================================
+
+  useEffect(() => {
+    setShowWorldTransition(true);
+    setTransitionVisible(true);
+
+    const hideTimer = window.setTimeout(() => {
+      setTransitionVisible(false);
+    }, 2200);
+
+    const removeTimer = window.setTimeout(() => {
+      setShowWorldTransition(false);
+    }, 2800);
+
+    return () => {
+      window.clearTimeout(hideTimer);
+      window.clearTimeout(removeTimer);
+    };
+  }, [currentLevelId]);
+
+  // =====================================
   // ANIMATION LOOP
+  // =====================================
 
   useEffect(() => {
     const animate = () => {
@@ -790,29 +1259,44 @@ export default function GameCanvas({
         draw();
       }
 
-      animationRef.current = requestAnimationFrame(animate);
+      animationRef.current =
+        requestAnimationFrame(animate);
     };
 
-    animationRef.current = requestAnimationFrame(animate);
+    animationRef.current =
+      requestAnimationFrame(animate);
 
     return () => {
       cancelAnimationFrame(animationRef.current);
     };
   }, [draw]);
 
+  // =====================================
   // BEST SCORE
+  // =====================================
 
   useEffect(() => {
     try {
-      localStorage.setItem(BEST_SCORE_KEY, String(bestScore));
+      localStorage.setItem(
+        BEST_SCORE_KEY,
+        String(bestScore)
+      );
     } catch {}
   }, [bestScore]);
 
+  // =====================================
   // SOUND
+  // =====================================
 
   useEffect(() => {
-    if (!sound) stopMusic();
+    if (!sound) {
+      stopMusic();
+    }
   }, [sound, stopMusic]);
+
+  // =====================================
+  // CLEANUP
+  // =====================================
 
   useEffect(() => {
     return () => {
@@ -825,23 +1309,41 @@ export default function GameCanvas({
     };
   }, [stopMusic]);
 
+  // =====================================
   // KEYBOARD
+  // =====================================
 
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.repeat) return;
 
-      if (event.key === "Escape") togglePause();
-      if (event.key.toLowerCase() === "s") swap();
-      if (event.key.toLowerCase() === "h") hint();
+      if (event.key === "Escape") {
+        togglePause();
+      }
 
-      if (event.key === " " && event.target.tagName !== "BUTTON") {
+      if (event.key.toLowerCase() === "s") {
+        swap();
+      }
+
+      if (event.key.toLowerCase() === "h") {
+        hint();
+      }
+
+      if (
+        event.code === "Space" &&
+        event.target.tagName !== "BUTTON"
+      ) {
         event.preventDefault();
         shoot();
       }
 
-      if (event.key === "1") toggleBooster("bomb");
-      if (event.key === "2") toggleBooster("rainbow");
+      if (event.key === "1") {
+        toggleBooster("bomb");
+      }
+
+      if (event.key === "2") {
+        toggleBooster("rainbow");
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -849,9 +1351,17 @@ export default function GameCanvas({
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [hint, shoot, swap, toggleBooster, togglePause]);
+  }, [
+    hint,
+    shoot,
+    swap,
+    toggleBooster,
+    togglePause,
+  ]);
 
-  // UI
+  // =====================================
+  // HUD DATA
+  // =====================================
 
   const stars = calculateStars(
     hud?.score ?? 0,
@@ -859,48 +1369,510 @@ export default function GameCanvas({
   );
 
   const boosters = [
-    { id: "bomb", icon: "💣", label: "Bomb", key: "1" },
-    { id: "rainbow", icon: "🌈", label: "Rainbow", key: "2" },
+    {
+      id: "bomb",
+      icon: "💣",
+      label: "Bomb",
+      key: "1",
+    },
+    {
+      id: "rainbow",
+      icon: "🌈",
+      label: "Rainbow",
+      key: "2",
+    },
   ];
 
   const g = gameRef.current;
 
+  // =====================================
+  // RENDER
+  // =====================================
+
   return (
-    <div style={{
-      width: W,
-      maxWidth: "100%",
-      margin: "0 auto",
-      color: "#fff",
-      fontFamily: "Inter, system-ui, sans-serif",
-    }}>
+    <div
+      className="bs-game-shell"
+      style={{
+        width: "100%",
+        maxWidth: W,
+        margin: "0 auto",
+        color: "#fff",
+        fontFamily: "Inter, system-ui, sans-serif",
+        position: "relative",
+        boxSizing: "border-box",
+      }}
+    >
       <style>{`
+        .bs-game-shell {
+          padding: 12px;
+          border: 1px solid rgba(129,140,248,.22);
+          border-radius: 22px;
+          background:
+            radial-gradient(circle at 10% 10%, rgba(59,130,246,.10), transparent 35%),
+            radial-gradient(circle at 90% 90%, rgba(147,51,234,.12), transparent 35%),
+            rgba(8,13,35,.82);
+          box-shadow:
+            0 20px 60px rgba(0,0,0,.35),
+            inset 0 1px rgba(255,255,255,.06);
+        }
+
         .bs-btn {
-          border: 1px solid rgba(125,211,252,.25);
-          background: #172554;
+          border: 1px solid rgba(125,211,252,.3);
+          background: linear-gradient(135deg,#263b76,#172554);
           color: #fff;
-          border-radius: 9px;
-          padding: 8px 10px;
+          border-radius: 11px;
+          padding: 9px 12px;
           font-weight: 800;
           cursor: pointer;
+          transition: all .22s ease;
+          box-shadow:
+            0 5px 14px rgba(0,0,0,.25),
+            inset 0 1px rgba(255,255,255,.12);
+          touch-action: manipulation;
         }
+
+        .bs-btn:hover:not(:disabled) {
+          background: linear-gradient(135deg,#2563eb,#6d28d9);
+          border-color: #93c5fd;
+          box-shadow:
+            0 0 18px rgba(59,130,246,.4),
+            0 8px 20px rgba(0,0,0,.3);
+          transform: translateY(-3px) scale(1.02);
+        }
+
+        .bs-btn:active:not(:disabled) {
+          transform: scale(.96);
+        }
+
         .bs-btn:disabled {
           opacity: .35;
           cursor: not-allowed;
         }
+
+        .bs-game-shell button:focus-visible {
+          outline: 2px solid #7dd3fc;
+          outline-offset: 3px;
+        }
+
+        .bs-topbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 8px;
+          width: 100%;
+          margin-bottom: 12px;
+          padding: 11px;
+          position: relative;
+          z-index: 5;
+          border: 1px solid rgba(129,140,248,.22);
+          border-radius: 15px;
+          background: linear-gradient(110deg,rgba(30,41,80,.92),rgba(17,24,55,.92));
+          box-shadow: 0 8px 25px rgba(0,0,0,.22);
+          backdrop-filter: blur(14px);
+          box-sizing: border-box;
+        }
+
+        .bs-topbar strong {
+          font-size: 13px;
+          letter-spacing: .5px;
+          text-shadow: 0 0 12px rgba(96,165,250,.3);
+        }
+
+        .bs-game-stage {
+          position: relative;
+          width: 100%;
+          aspect-ratio: ${W} / ${H};
+          overflow: hidden;
+          border-radius: 20px;
+          background:
+            radial-gradient(circle at 50% 35%, ${worldGlow}55, transparent 55%),
+            ${worldBackground};
+          border: 1px solid ${worldGlow}88;
+          box-shadow:
+            0 0 0 1px rgba(255,255,255,.025),
+            0 18px 45px rgba(0,0,0,.4),
+            0 0 30px ${worldGlow}33;
+          touch-action: none;
+          overscroll-behavior: contain;
+          isolation: isolate;
+          transition: background .5s ease, box-shadow .5s ease;
+        }
+
+        .bs-game-stage::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          z-index: 1;
+          pointer-events: none;
+          border-radius: inherit;
+          background: linear-gradient(
+            180deg,
+            rgba(255,255,255,.045),
+            transparent 20%,
+            transparent 80%,
+            rgba(99,102,241,.07)
+          );
+        }
+
+        .bs-world-label {
+          position: absolute;
+          top: 12px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 4;
+          color: #ffffffbb;
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 4px;
+          pointer-events: none;
+          text-shadow: 0 0 10px rgba(255,255,255,.5), 0 0 22px ${worldGlow};
+          white-space: nowrap;
+        }
+
+        .bs-game-stage canvas {
+          display: block;
+        }
+
+        /* TOUCH INSTRUCTION */
+
+        .bs-touch-hint {
+          display: none;
+        }
+
+        /* WORLD TRANSITION */
+
+        .bs-world-transition {
+          position: absolute;
+          inset: 0;
+          z-index: 20;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+          background:
+            radial-gradient(circle at center, ${worldGlow}88, ${worldBackground} 75%);
+          transition: opacity .6s ease, transform .6s ease;
+          pointer-events: none;
+        }
+
+        .bs-world-transition.hide {
+          opacity: 0;
+          transform: scale(1.12);
+        }
+
+        .bs-transition-ring {
+          position: absolute;
+          width: 180px;
+          height: 180px;
+          border: 2px solid ${worldGlow};
+          border-radius: 50%;
+          box-shadow: 0 0 20px ${worldGlow}, inset 0 0 25px ${worldGlow};
+          animation: bs-ring-reveal 2.2s ease-out forwards;
+        }
+
+        .bs-transition-ring.second {
+          width: 260px;
+          height: 260px;
+          animation-delay: .15s;
+          opacity: .5;
+        }
+
+        .bs-transition-content {
+          position: relative;
+          z-index: 2;
+          text-align: center;
+          animation: bs-title-reveal .8s ease both;
+          padding: 10px;
+        }
+
+        .bs-transition-world {
+          color: ${worldGlow};
+          font-size: 11px;
+          font-weight: 900;
+          letter-spacing: 5px;
+          margin-bottom: 12px;
+        }
+
+        .bs-transition-title {
+          color: white;
+          font-size: clamp(30px,7vw,52px);
+          font-weight: 1000;
+          letter-spacing: 3px;
+          text-shadow: 0 0 15px ${worldGlow}, 0 0 35px ${worldGlow};
+        }
+
+        .bs-transition-level {
+          margin-top: 12px;
+          color: #ffffffcc;
+          font-size: 15px;
+          font-weight: 800;
+          letter-spacing: 4px;
+        }
+
+        .bs-transition-line {
+          width: 100px;
+          height: 3px;
+          margin: 20px auto 0;
+          border-radius: 10px;
+          background: ${worldGlow};
+          box-shadow: 0 0 15px ${worldGlow};
+          animation: bs-line-expand 1s ease both;
+        }
+
+        @keyframes bs-ring-reveal {
+          from {
+            transform: scale(.2) rotate(0deg);
+            opacity: 0;
+          }
+          45% { opacity: .8; }
+          to {
+            transform: scale(2.1) rotate(180deg);
+            opacity: 0;
+          }
+        }
+
+        @keyframes bs-title-reveal {
+          from {
+            opacity: 0;
+            transform: translateY(25px) scale(.8);
+            filter: blur(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            filter: blur(0);
+          }
+        }
+
+        @keyframes bs-line-expand {
+          from { width: 0; }
+          to { width: 100px; }
+        }
+
+        /* BOOSTER PANEL */
+
+        .bs-controls {
+          display: grid;
+          grid-template-columns: repeat(4,minmax(0,1fr));
+          gap: 10px;
+          padding: 12px;
+          margin-top: 10px;
+          border: 1px solid rgba(129,140,248,.22);
+          border-radius: 17px;
+          background: linear-gradient(135deg,rgba(24,34,73,.96),rgba(12,18,43,.96));
+          box-shadow: 0 12px 30px rgba(0,0,0,.25), inset 0 1px rgba(255,255,255,.06);
+          box-sizing: border-box;
+        }
+
+        .bs-controls .bs-btn {
+          min-width: 0;
+          min-height: 65px;
+          padding: 9px 5px;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          gap: 4px;
+          background: linear-gradient(145deg,#26376b,#111b42);
+        }
+
+        .bs-controls .bs-btn:hover:not(:disabled) {
+          background: linear-gradient(145deg,#4338ca,#1d4ed8);
+        }
+
+        /* GAME INFO */
+
+        .bs-game-info {
+          display: flex;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 9px;
+          padding: 10px 12px;
+          border: 1px solid rgba(129,140,248,.16);
+          border-radius: 12px;
+          background: rgba(15,23,52,.75);
+          color: #cbd5e1;
+          box-sizing: border-box;
+        }
+
+        .bs-game-info span {
+          font-size: 10px;
+          font-weight: 700;
+        }
+
+        /* MOBILE RESPONSIVE */
+
+        @media (max-width: 600px) {
+          .bs-game-shell {
+            padding: 6px;
+            border-radius: 14px;
+            width: 100%;
+          }
+
+          .bs-topbar {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 7px;
+            padding: 8px;
+            margin-bottom: 8px;
+          }
+
+          .bs-topbar > * {
+            min-width: 0;
+            text-align: center;
+          }
+
+          .bs-topbar strong {
+            font-size: 10px;
+          }
+
+          .bs-topbar .bs-btn {
+            min-height: 38px;
+            padding: 7px 5px;
+            font-size: 11px;
+          }
+
+          .bs-game-stage {
+            width: 100%;
+            aspect-ratio: ${W} / ${H};
+            border-radius: 12px;
+            touch-action: none;
+            overscroll-behavior: contain;
+            user-select: none;
+            -webkit-user-select: none;
+          }
+
+          .bs-game-stage canvas {
+            touch-action: none !important;
+            user-select: none;
+            -webkit-user-select: none;
+          }
+
+          .bs-world-label {
+            top: 8px;
+            font-size: 8px;
+            letter-spacing: 2px;
+          }
+
+          .bs-touch-hint {
+            display: block;
+            position: absolute;
+            bottom: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 4;
+            white-space: nowrap;
+            pointer-events: none;
+            padding: 6px 10px;
+            border-radius: 20px;
+            background: rgba(15, 23, 42, .78);
+            border: 1px solid rgba(125, 211, 252, .3);
+            color: #bae6fd;
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 1px;
+          }
+
+          .bs-controls {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+            padding: 8px;
+            margin-top: 8px;
+          }
+
+          .bs-controls .bs-btn {
+            min-height: 62px;
+            padding: 7px 4px;
+            border-radius: 12px;
+            touch-action: manipulation;
+          }
+
+          .bs-controls .bs-btn:active {
+            transform: scale(.94);
+          }
+
+          .bs-game-info {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            justify-content: center;
+            text-align: center;
+            gap: 9px;
+            padding: 10px 6px;
+          }
+
+          .bs-game-info span {
+            font-size: 10px;
+          }
+
+          .bs-transition-title {
+            font-size: clamp(20px, 6vw, 32px);
+          }
+
+          .bs-transition-world {
+            font-size: 9px;
+            letter-spacing: 3px;
+          }
+
+          .bs-transition-level {
+            font-size: 12px;
+          }
+
+          .bs-transition-ring {
+            width: 120px;
+            height: 120px;
+          }
+
+          .bs-transition-ring.second {
+            width: 180px;
+            height: 180px;
+          }
+        }
+
+        @media (max-width: 380px) {
+          .bs-topbar {
+            gap: 5px;
+            padding: 6px;
+          }
+
+          .bs-topbar .bs-btn {
+            font-size: 10px;
+            padding: 6px 3px;
+          }
+
+          .bs-controls {
+            gap: 6px;
+            padding: 6px;
+          }
+
+          .bs-controls .bs-btn {
+            min-height: 56px;
+          }
+
+          .bs-game-info span {
+            font-size: 9px;
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .bs-game-shell *,
+          .bs-game-shell *::before,
+          .bs-game-shell *::after {
+            animation-duration: .01ms !important;
+            transition-duration: .01ms !important;
+          }
+        }
       `}</style>
 
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: 6,
-        padding: 9,
-        background: "#111827",
-        borderRadius: 12,
-        marginBottom: 8,
-        fontSize: 12,
-      }}>
-        <button className="bs-btn" onClick={onLevelsClick || onExit}>
+      {/* TOP BAR */}
+
+      <div className="bs-topbar">
+        <button
+          className="bs-btn"
+          onClick={onLevelsClick || onExit}
+        >
           ☰ Levels
         </button>
 
@@ -910,157 +1882,228 @@ export default function GameCanvas({
 
         <strong>⭐ {hud?.score ?? 0}</strong>
 
+        <strong style={{ color: "#67e8f9" }}>
+          🫧 {hud?.remaining ?? 0} Left
+        </strong>
+
         <button className="bs-btn" onClick={togglePause}>
           Ⅱ
         </button>
 
-        <button className="bs-btn" onClick={() => setSettings(true)}>
+        <button
+          className="bs-btn"
+          onClick={() => setSettings(true)}
+        >
           ⚙️
         </button>
       </div>
 
-      <div style={{
-        display: "flex",
-        justifyContent: "space-between",
-        fontSize: 11,
-        color: "#cbd5e1",
-        margin: "0 4px 7px",
-      }}>
-        <span>🎯 {hud?.shots ?? actualLevel.shots} shots</span>
-        <span>🏆 Best: {bestScore}</span>
-        <span>🔥 Combo x{hud?.combo ?? 0}</span>
-      </div>
+      {/* GAME STAGE */}
 
-      <div style={{
-        position: "relative",
-        borderRadius: 18,
-        overflow: "hidden",
-        border: "2px solid rgba(56,189,248,.35)",
-        background: "radial-gradient(circle at 50% 35%,#1e3a5f,#071326 75%)",
-        boxShadow: "0 15px 35px #0009",
-      }}>
+      <div className="bs-game-stage">
+        {showWorldTransition && (
+          <div
+            className={`bs-world-transition ${
+              transitionVisible ? "" : "hide"
+            }`}
+          >
+            <div className="bs-transition-ring" />
+            <div className="bs-transition-ring second" />
+
+            <div className="bs-transition-content">
+              <div className="bs-transition-world">
+                ENTERING NEW WORLD
+              </div>
+
+              <div className="bs-transition-title">
+                {worldName}
+              </div>
+
+              <div className="bs-transition-level">
+                LEVEL {currentLevelId}
+              </div>
+
+              <div className="bs-transition-line" />
+            </div>
+          </div>
+        )}
+
+        <div className="bs-world-label">
+          {worldName}
+        </div>
+
+        {/* MOBILE TOUCH GUIDE */}
+
+        <div className="bs-touch-hint">
+          👆 DRAG TO AIM • RELEASE TO SHOOT
+        </div>
+
+        <GameBoard3D
+          board={sceneState.board}
+          current={sceneState.current}
+          angle={sceneState.angle}
+          effects={sceneState.effects}
+          levelId={currentLevelId}
+        />
+
         <canvas
           ref={canvasRef}
           width={W}
           height={H}
-          onPointerMove={aim}
-          onPointerDown={(event) => {
-            pointerDownRef.current = true;
-            aim(event);
-
-            if (event.currentTarget.setPointerCapture) {
-              event.currentTarget.setPointerCapture(event.pointerId);
-            }
-          }}
-          onPointerUp={(event) => {
-            if (!pointerDownRef.current) return;
-
-            pointerDownRef.current = false;
-            aim(event);
-            shoot();
-          }}
-          onPointerCancel={() => {
-            pointerDownRef.current = false;
-          }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
           style={{
-            display: "block",
+            position: "absolute",
+            inset: 0,
+            zIndex: 2,
             width: "100%",
-            height: "auto",
-            touchAction: "none",
+            height: "100%",
             cursor: "crosshair",
+            touchAction: "none",
+            background: "transparent",
+            userSelect: "none",
+            WebkitUserSelect: "none",
           }}
         />
 
-        <div style={{
-          position: "absolute",
-          bottom: 12,
-          left: 12,
-          padding: "6px 9px",
-          background: "#0f172add",
-          border: "1px solid #38bdf866",
-          borderRadius: 10,
-          textAlign: "center",
-          pointerEvents: "none",
-        }}>
-          <small style={{
-            display: "block",
-            color: "#94a3b8",
-            fontSize: 9,
-          }}>
+        {/* NEXT BUBBLE */}
+
+        <div
+          style={{
+            position: "absolute",
+            bottom: 12,
+            left: 12,
+            zIndex: 4,
+            padding: "6px 9px",
+            background: "#0f172add",
+            border: "1px solid #38bdf866",
+            borderRadius: 10,
+            textAlign: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <small
+            style={{
+              display: "block",
+              color: "#94a3b8",
+              fontSize: 9,
+            }}
+          >
             NEXT
           </small>
 
-          <span style={{
-            display: "inline-block",
-            width: 22,
-            height: 22,
-            borderRadius: "50%",
-            background: COLOR_MAP[hud?.next || g?.next] || "#fff",
-          }} />
+          <span
+            style={{
+              display: "inline-block",
+              width: 22,
+              height: 22,
+              borderRadius: "50%",
+              background:
+                COLOR_MAP[hud?.next || g?.next] || "#fff",
+            }}
+          />
         </div>
 
+        {/* MESSAGE */}
+
         {message && !hud?.outcome && (
-          <div style={{
-            position: "absolute",
-            top: "42%",
-            left: 0,
-            right: 0,
-            textAlign: "center",
-            color: "#fde68a",
-            fontSize: 20,
-            fontWeight: 900,
-            pointerEvents: "none",
-          }}>
+          <div
+            style={{
+              position: "absolute",
+              zIndex: 5,
+              top: "42%",
+              left: 0,
+              right: 0,
+              textAlign: "center",
+              color: "#fde68a",
+              fontSize: 20,
+              fontWeight: 900,
+              pointerEvents: "none",
+            }}
+          >
             {message}
           </div>
         )}
 
+        {/* PAUSE SCREEN */}
+
         {paused && !hud?.outcome && (
-          <div style={{
-            position: "absolute",
-            inset: 0,
-            background: "#020617df",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: 12,
-          }}>
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 10,
+              background: "#020617df",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
             <h2>⏸ PAUSED</h2>
-            <button className="bs-btn" onClick={togglePause}>▶ Resume</button>
-            <button className="bs-btn" onClick={restart}>↻ Restart</button>
+
+            <button className="bs-btn" onClick={togglePause}>
+              ▶ Resume
+            </button>
+
+            <button className="bs-btn" onClick={restart}>
+              ↻ Restart
+            </button>
           </div>
         )}
 
+        {/* GAME OVER / LEVEL COMPLETE */}
+
         {hud?.outcome && (
-          <div style={{
-            position: "absolute",
-            inset: 0,
-            background: "#020617ed",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: 12,
-            textAlign: "center",
-            padding: 14,
-          }}>
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 11,
+              background: "#020617ed",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: 12,
+              textAlign: "center",
+              padding: 14,
+              boxSizing: "border-box",
+            }}
+          >
             <div style={{ fontSize: 52 }}>
               {hud.outcome === "WON" ? "🏆" : "💔"}
             </div>
 
-            <h2 style={{
-              margin: 0,
-              color: hud.outcome === "WON" ? "#34d399" : "#fb7185",
-            }}>
-              {hud.outcome === "WON" ? "LEVEL CLEARED!" : "GAME OVER"}
+            <h2
+              style={{
+                margin: 0,
+                color:
+                  hud.outcome === "WON"
+                    ? "#34d399"
+                    : "#fb7185",
+              }}
+            >
+              {hud.outcome === "WON"
+                ? "LEVEL CLEARED!"
+                : "GAME OVER"}
             </h2>
 
             {hud.outcome === "WON" && (
               <>
-                <div style={{ fontSize: 34, color: "#fbbf24" }}>
-                  {"★".repeat(stars)}{"☆".repeat(3 - stars)}
+                <div
+                  style={{
+                    fontSize: 34,
+                    color: "#fbbf24",
+                  }}
+                >
+                  {"★".repeat(stars)}
+                  {"☆".repeat(3 - stars)}
                 </div>
+
                 <strong>{stars} / 3 STARS</strong>
               </>
             )}
@@ -1070,27 +2113,44 @@ export default function GameCanvas({
             </strong>
 
             {hud.outcome === "WON" && (
-              <div style={{
-                width: "100%",
-                maxWidth: 260,
-                padding: 9,
-                borderRadius: 9,
-                background: "#1e293b",
-                fontSize: 12,
-                color: saveStatus.state === "error"
-                  ? "#fca5a5"
-                  : saveStatus.state === "saved"
-                  ? "#86efac"
-                  : "#bfdbfe",
-              }}>
-                {saveStatus.state === "saving" && "⏳ Saving your progress..."}
-                {saveStatus.state === "saved" && "✓ Progress saved successfully!"}
-                {saveStatus.state === "idle" && "Preparing your progress..."}
+              <div
+                style={{
+                  width: "100%",
+                  maxWidth: 260,
+                  padding: 9,
+                  borderRadius: 9,
+                  background: "#1e293b",
+                  fontSize: 12,
+                  color:
+                    saveStatus.state === "error"
+                      ? "#fca5a5"
+                      : saveStatus.state === "saved"
+                      ? "#86efac"
+                      : "#bfdbfe",
+                  boxSizing: "border-box",
+                }}
+              >
+                {saveStatus.state === "saving" &&
+                  "⏳ Saving your progress..."}
+
+                {saveStatus.state === "saved" &&
+                  "✓ Progress saved successfully!"}
+
+                {saveStatus.state === "idle" &&
+                  "Preparing your progress..."}
+
                 {saveStatus.state === "error" && (
                   <>
-                    <div>{saveStatus.message || "Could not save progress."}</div>
+                    <div>
+                      {saveStatus.message ||
+                        "Could not save progress."}
+                    </div>
+
                     {saveStatus.canRetry && (
-                      <button className="bs-btn" onClick={onRetrySave}>
+                      <button
+                        className="bs-btn"
+                        onClick={onRetrySave}
+                      >
                         ↻ Retry Save
                       </button>
                     )}
@@ -1113,48 +2173,135 @@ export default function GameCanvas({
               </button>
             )}
 
-            <button className="bs-btn" onClick={onLevelsClick || onExit}>
+            <button
+              className="bs-btn"
+              onClick={onLevelsClick || onExit}
+            >
               ☰ Back to Levels
             </button>
           </div>
         )}
 
+        {/* SETTINGS MODAL */}
+
         {settings && (
-          <div style={{
-            position: "absolute",
-            inset: 0,
-            background: "#020617ed",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: 12,
-          }}>
-            <h2>⚙️ SETTINGS</h2>
+          <div
+            onClick={() => setSettings(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 99999,
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              padding: 20,
+              background: "rgba(2,6,23,.82)",
+              backdropFilter: "blur(12px)",
+            }}
+          >
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{
+                width: "100%",
+                maxWidth: 360,
+                padding: 26,
+                borderRadius: 22,
+                background: "linear-gradient(145deg,#172554,#0f172a)",
+                border: "1px solid rgba(56,189,248,.45)",
+                boxShadow: "0 20px 70px rgba(0,0,0,.65)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 20,
+                color: "#fff",
+                boxSizing: "border-box",
+              }}
+            >
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 36 }}>⚙️</div>
 
-            <button className="bs-btn" onClick={() => setSound((v) => !v)}>
-              {sound ? "🔊 Sound ON" : "🔇 Sound OFF"}
-            </button>
+                <h2
+                  style={{
+                    margin: "8px 0 4px",
+                    fontSize: 23,
+                    letterSpacing: 2,
+                    color: "#7dd3fc",
+                  }}
+                >
+                  SETTINGS
+                </h2>
 
-            <button className="bs-btn" onClick={() => setSettings(false)}>
-              Done
-            </button>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    color: "#94a3b8",
+                  }}
+                >
+                  Customize your game experience
+                </p>
+              </div>
+
+              <div
+                style={{
+                  width: "100%",
+                  padding: 15,
+                  borderRadius: 13,
+                  background: "rgba(255,255,255,.06)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  boxSizing: "border-box",
+                }}
+              >
+                <div>
+                  <strong style={{ display: "block" }}>
+                    Game Sound
+                  </strong>
+
+                  <small style={{ color: "#94a3b8" }}>
+                    Sound effects and music
+                  </small>
+                </div>
+
+                <button
+                  className="bs-btn"
+                  onClick={() => setSound((value) => !value)}
+                  style={{
+                    background: sound ? "#047857" : "#475569",
+                    minWidth: 95,
+                  }}
+                >
+                  {sound ? "🔊 ON" : "🔇 OFF"}
+                </button>
+              </div>
+
+              <button
+                className="bs-btn"
+                onClick={() => setSettings(false)}
+                style={{
+                  width: "100%",
+                  padding: 13,
+                  borderRadius: 12,
+                  background: "linear-gradient(90deg,#2563eb,#7c3aed)",
+                  border: "none",
+                  fontSize: 14,
+                }}
+              >
+                ✓ DONE
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      <div style={{
-        display: "flex",
-        justifyContent: "space-around",
-        flexWrap: "wrap",
-        gap: 7,
-        padding: 10,
-        marginTop: 9,
-        background: "#111827",
-        borderRadius: 14,
-      }}>
+      {/* BOOSTERS AND CONTROLS */}
+
+      <div className="bs-controls">
         {boosters.map((booster) => {
-          const count = hud?.boosters?.[booster.id] ?? 0;
+          const count =
+            hud?.boosters?.[booster.id] ?? 0;
+
           const active = hud?.armed === booster.id;
 
           return (
@@ -1164,16 +2311,19 @@ export default function GameCanvas({
               onClick={() => toggleBooster(booster.id)}
               disabled={!count}
               style={{
-                minWidth: 75,
-                background: active ? "#9f1239" : "#172554",
+                background: active
+                  ? "linear-gradient(135deg,#be123c,#881337)"
+                  : undefined,
               }}
             >
               <span style={{ display: "block", fontSize: 20 }}>
                 {booster.icon}
               </span>
+
               <span style={{ display: "block", fontSize: 10 }}>
                 {booster.label} ×{count}
               </span>
+
               <span style={{ display: "block", fontSize: 9 }}>
                 Key {booster.key}
               </span>
@@ -1181,19 +2331,30 @@ export default function GameCanvas({
           );
         })}
 
-        <button className="bs-btn" onClick={swap}>🔄 Swap</button>
-        <button className="bs-btn" onClick={hint}>💡 Hint ×{hintCount}</button>
+        <button className="bs-btn" onClick={swap}>
+          <span style={{ fontSize: 20 }}>🔄</span>
+          <span style={{ fontSize: 10 }}>Swap</span>
+          <span style={{ fontSize: 9 }}>Key S</span>
+        </button>
+
+        <button
+          className="bs-btn"
+          onClick={hint}
+          disabled={hintCount <= 0}
+        >
+          <span style={{ fontSize: 20 }}>💡</span>
+          <span style={{ fontSize: 10 }}>Hint ×{hintCount}</span>
+          <span style={{ fontSize: 9 }}>Key H</span>
+        </button>
       </div>
 
-      <div style={{
-        display: "flex",
-        justifyContent: "space-between",
-        marginTop: 8,
-        color: "#94a3b8",
-        fontSize: 10,
-      }}>
-        <span>Drag to aim • Release to shoot</span>
-        <span>Space: Shoot • Esc: Pause</span>
+      {/* GAME INFO */}
+
+      <div className="bs-game-info">
+        <span>🫧 Remaining: {hud?.remaining ?? 0}</span>
+        <span>Shots: {hud?.shots ?? actualLevel.shots}</span>
+        <span>Best: {bestScore}</span>
+        <span>Space: Shoot • S: Swap • Esc: Pause</span>
       </div>
     </div>
   );
