@@ -1,3 +1,4 @@
+import "./GameCanvas.css";
 import React, {
   useCallback,
   useEffect,
