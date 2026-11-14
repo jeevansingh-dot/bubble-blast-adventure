@@ -1,4 +1,3 @@
-
 import React, {
   useCallback,
   useEffect,
@@ -103,6 +102,7 @@ function drawBubble(ctx, x, y, color, radius = R) {
   ctx.stroke();
 
   ctx.beginPath();
+
   ctx.ellipse(
     x - radius * 0.28,
     y - radius * 0.35,
@@ -117,6 +117,7 @@ function drawBubble(ctx, x, y, color, radius = R) {
   ctx.fill();
 
   ctx.beginPath();
+
   ctx.arc(
     x + radius * 0.35,
     y + radius * 0.25,
@@ -205,8 +206,6 @@ export default function GameCanvas({
     [actualLevel.starThresholds]
   );
 
-  // WORLD THEME
-
   const currentLevelId = Number(actualLevel.id || levelId || 1);
 
   const worldBackground =
@@ -248,7 +247,9 @@ export default function GameCanvas({
       ? "LAVA VOLCANO"
       : "COSMIC GALAXY";
 
+  // =====================================
   // REFS
+  // =====================================
 
   const canvasRef = useRef(null);
   const gameRef = useRef(null);
@@ -268,7 +269,9 @@ export default function GameCanvas({
   const onFinishRef = useRef(onFinish);
   onFinishRef.current = onFinish;
 
+  // =====================================
   // STATE
+  // =====================================
 
   const [hud, setHud] = useState(null);
 
@@ -434,7 +437,7 @@ export default function GameCanvas({
 
     // AIM TRAJECTORY
 
-    if (g.status === "READY" && !g.paused) {
+    if (g.status === "READY" && !g.paused && !g.flyingBubble) {
       const trajectory = traceShot(
         g.board,
         LAUNCHER_X,
@@ -495,7 +498,9 @@ export default function GameCanvas({
       }
     }
 
-    // FLYING BUBBLE - REAL WALL BOUNCE ANIMATION
+    // =====================================
+    // FLYING BUBBLE - WALL BOUNCE
+    // =====================================
 
     if (g.flyingBubble) {
       const b = g.flyingBubble;
@@ -531,7 +536,7 @@ export default function GameCanvas({
         totalDistance += distance;
       }
 
-      // Current position along the complete path
+      // Calculate current position along path
 
       let remainingDistance = totalDistance * eased;
 
@@ -589,6 +594,8 @@ export default function GameCanvas({
 
       ctx.save();
 
+      // Draw trail along the bounced path
+
       ctx.beginPath();
       ctx.moveTo(trailPoints[0].x, trailPoints[0].y);
 
@@ -604,7 +611,7 @@ export default function GameCanvas({
       ctx.shadowBlur = 15;
       ctx.stroke();
 
-      // Small particles
+      // Small particles along travelled path
 
       for (let i = 1; i <= 5; i++) {
         const t = i / 6;
@@ -902,6 +909,48 @@ export default function GameCanvas({
     const { r, c } = simulation.cell;
     const target = cellToPixel(r, c);
 
+    // =====================================
+    // BUILD COMPLETE FLIGHT PATH
+    // =====================================
+
+    const flightPath = [...simulation.path];
+
+    const lastPoint = flightPath[flightPath.length - 1];
+
+    // Ensure path ends at the final snap cell.
+
+    if (
+      !lastPoint ||
+      Math.hypot(
+        lastPoint.x - target.x,
+        lastPoint.y - target.y
+      ) > 1
+    ) {
+      flightPath.push({
+        x: target.x,
+        y: target.y,
+      });
+    }
+
+    // Calculate total flight distance.
+
+    let totalDistance = 0;
+
+    for (let i = 1; i < flightPath.length; i++) {
+      totalDistance += Math.hypot(
+        flightPath[i].x - flightPath[i - 1].x,
+        flightPath[i].y - flightPath[i - 1].y
+      );
+    }
+
+    // Smooth duration according to distance.
+
+    const flightDuration = clamp(
+      totalDistance * 0.8,
+      300,
+      700
+    );
+
     shotLockRef.current = true;
 
     if (special) {
@@ -912,21 +961,19 @@ export default function GameCanvas({
       g.next = pickColor(g.board, g.rng);
     }
 
-    // IMPORTANT: Store complete trajectory path.
-    // Actual bubble will now follow every wall bounce.
+    // =====================================
+    // START REAL BOUNCE ANIMATION
+    // =====================================
 
     g.flyingBubble = {
       startX: LAUNCHER_X,
       startY: LAUNCHER_Y,
       endX: target.x,
       endY: target.y,
-      path: [
-        ...simulation.path,
-        target,
-      ],
+      path: flightPath,
       color,
       start: performance.now(),
-      duration: 230,
+      duration: flightDuration,
     };
 
     startMusic();
@@ -944,7 +991,9 @@ export default function GameCanvas({
     g.shots--;
 
     const previousBoard = g.board.map((row) =>
-      row.map((bubble) => (bubble ? { ...bubble } : null))
+      row.map((bubble) =>
+        bubble ? { ...bubble } : null
+      )
     );
 
     const result = resolveShot(g.board, r, c, color);
@@ -966,7 +1015,7 @@ export default function GameCanvas({
           x: pos.x,
           y: pos.y,
           color: bubble.color,
-          start: performance.now() + 230,
+          start: performance.now() + flightDuration,
           duration: 500,
           falling: true,
         });
@@ -1004,6 +1053,8 @@ export default function GameCanvas({
 
     sync();
 
+    // Resolve the animated shot after the actual flight.
+
     window.setTimeout(() => {
       if (gameRef.current === g) {
         g.flyingBubble = null;
@@ -1012,7 +1063,7 @@ export default function GameCanvas({
         sync();
         checkObjective();
       }
-    }, 235);
+    }, flightDuration + 10);
 
     window.setTimeout(() => {
       if (gameRef.current === g) {
@@ -1130,8 +1181,6 @@ export default function GameCanvas({
         aim(event);
         return;
       }
-
-      // Desktop mouse hover aiming.
 
       if (pointerDownRef.current) {
         if (activePointerIdRef.current !== event.pointerId) {

@@ -20,8 +20,16 @@ export default function RegisterPage() {
     e.preventDefault();
     setError("");
 
-    if (password.length < 8) {
-      setError("Password must be at least 8 characters");
+    const cleanName = name.trim();
+    const cleanEmail = email.trim();
+
+    if (cleanName.length < 2 || cleanName.length > 40) {
+      setError("Name must be 2 to 40 characters");
+      return;
+    }
+
+    if (password.length < 8 || password.length > 72) {
+      setError("Password must be 8 to 72 characters");
       return;
     }
 
@@ -33,8 +41,22 @@ export default function RegisterPage() {
     setBusy(true);
 
     try {
-      await register({ name, email, password, confirmPassword });
-      navigate("/levels", { replace: true });
+      await register({
+        name: cleanName,
+        email: cleanEmail,
+        password,
+        confirmPassword,
+      });
+
+      // Registration successful: redirect to Login
+      navigate("/login", {
+        replace: true,
+        state: {
+          registered: true,
+          email: cleanEmail,
+        },
+      });
+
     } catch (err) {
       setError(err.message || "Unable to create account");
       setBusy(false);
@@ -307,23 +329,47 @@ export default function RegisterPage() {
         }
 
         @keyframes registerFloat {
-          0%, 100% { transform: translateY(0) rotate(-5deg); }
-          50% { transform: translateY(-8px) rotate(5deg); }
+          0%, 100% {
+            transform: translateY(0) rotate(-5deg);
+          }
+
+          50% {
+            transform: translateY(-8px) rotate(5deg);
+          }
         }
 
         @keyframes registerEnter {
-          from { opacity: 0; transform: translateY(20px) scale(.97); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
+          from {
+            opacity: 0;
+            transform: translateY(20px) scale(.97);
+          }
+
+          to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
         }
 
         @media (max-width: 480px) {
-          .arcade-register { padding: 24px 12px; }
-          .register-card { padding: 30px 21px; border-radius: 23px; }
-          .register-heading { font-size: 24px; }
+          .arcade-register {
+            padding: 24px 12px;
+          }
+
+          .register-card {
+            padding: 30px 21px;
+            border-radius: 23px;
+          }
+
+          .register-heading {
+            font-size: 24px;
+          }
         }
 
         @media (prefers-reduced-motion: reduce) {
-          .register-card, .register-logo { animation: none; }
+          .register-card,
+          .register-logo {
+            animation: none;
+          }
         }
       `}</style>
 
@@ -355,6 +401,7 @@ export default function RegisterPage() {
             <label className="register-label" htmlFor="register-name">
               PLAYER NAME
             </label>
+
             <input
               className="register-input"
               id="register-name"
@@ -373,6 +420,7 @@ export default function RegisterPage() {
             <label className="register-label" htmlFor="register-email">
               EMAIL ADDRESS
             </label>
+
             <input
               className="register-input"
               id="register-email"
@@ -434,7 +482,9 @@ export default function RegisterPage() {
               <button
                 type="button"
                 className="register-toggle"
-                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                onClick={() =>
+                  setShowConfirmPassword(!showConfirmPassword)
+                }
               >
                 {showConfirmPassword ? "HIDE" : "SHOW"}
               </button>
@@ -446,7 +496,9 @@ export default function RegisterPage() {
             className="register-submit"
             disabled={busy}
           >
-            {busy ? "⏳ CREATING ACCOUNT..." : "🚀  CREATE ACCOUNT"}
+            {busy
+              ? "⏳ CREATING ACCOUNT..."
+              : "🚀  CREATE ACCOUNT"}
           </button>
         </form>
 
