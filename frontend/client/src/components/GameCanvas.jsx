@@ -153,6 +153,10 @@ function createGame(level, seed) {
     bestCombo: 0,
     floatingDropped: 0,
     angle: Math.PI / 2,
+
+    // Cached aim trajectory: avoids recalculating every frame.
+    aimTrajectory: null,
+
     swappedSinceShot: false,
     shotsHistory: [],
     boosters: {
@@ -436,15 +440,17 @@ export default function GameCanvas({
       ctx.fill();
     }
 
-    // AIM TRAJECTORY
+    // CACHED AIM TRAJECTORY
 
     if (g.status === "READY" && !g.paused && !g.flyingBubble) {
-      const trajectory = traceShot(
-        g.board,
-        LAUNCHER_X,
-        LAUNCHER_Y,
-        g.angle
-      );
+      const trajectory =
+        g.aimTrajectory ||
+        traceShot(
+          g.board,
+          LAUNCHER_X,
+          LAUNCHER_Y,
+          g.angle
+        );
 
       if (trajectory?.path?.length > 1) {
         const points = trajectory.path;
@@ -454,9 +460,9 @@ export default function GameCanvas({
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
 
-        points.forEach((point) => {
-          ctx.lineTo(point.x, point.y);
-        });
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
 
         ctx.strokeStyle = "rgba(56,189,248,.22)";
         ctx.lineWidth = 7;
@@ -467,9 +473,9 @@ export default function GameCanvas({
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
 
-        points.forEach((point) => {
-          ctx.lineTo(point.x, point.y);
-        });
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x, points[i].y);
+        }
 
         ctx.strokeStyle = "rgba(255,255,255,.85)";
         ctx.lineWidth = 2;
@@ -522,22 +528,8 @@ export default function GameCanvas({
               { x: b.endX, y: b.endY },
             ];
 
-      // Calculate total path distance
-
-      let totalDistance = 0;
-      const segmentLengths = [];
-
-      for (let i = 1; i < points.length; i++) {
-        const distance = Math.hypot(
-          points[i].x - points[i - 1].x,
-          points[i].y - points[i - 1].y
-        );
-
-        segmentLengths.push(distance);
-        totalDistance += distance;
-      }
-
-      // Calculate current position along path
+      const segmentLengths = b.segmentLengths || [];
+      const totalDistance = b.totalDistance || 0;
 
       let remainingDistance = totalDistance * eased;
 
@@ -595,14 +587,12 @@ export default function GameCanvas({
 
       ctx.save();
 
-      // Draw trail along the bounced path
-
       ctx.beginPath();
       ctx.moveTo(trailPoints[0].x, trailPoints[0].y);
 
-      trailPoints.forEach((point) => {
-        ctx.lineTo(point.x, point.y);
-      });
+      for (let i = 1; i < trailPoints.length; i++) {
+        ctx.lineTo(trailPoints[i].x, trailPoints[i].y);
+      }
 
       ctx.strokeStyle = trailGradient;
       ctx.lineWidth = R * 0.85;
@@ -611,8 +601,6 @@ export default function GameCanvas({
       ctx.shadowColor = fill;
       ctx.shadowBlur = 15;
       ctx.stroke();
-
-      // Small particles along travelled path
 
       for (let i = 1; i <= 5; i++) {
         const t = i / 6;
@@ -735,8 +723,7 @@ export default function GameCanvas({
 
     draw();
   }, [draw, starThresholds]);
-
-  // =====================================
+    // =====================================
   // FINISH GAME
   // =====================================
 
@@ -748,6 +735,7 @@ export default function GameCanvas({
 
       g.status = outcome;
       g.flyingBubble = null;
+      g.aimTrajectory = null;
 
       shotLockRef.current = false;
       pointerDownRef.current = false;
@@ -829,7 +817,7 @@ export default function GameCanvas({
   }, [finishGame]);
 
   // =====================================
-  // AIM
+  // AIM - OPTIMIZED
   // =====================================
 
   const aim = useCallback(
@@ -862,7 +850,26 @@ export default function GameCanvas({
         x - LAUNCHER_X
       );
 
-      g.angle = clamp(angle, MIN_ANGLE, MAX_ANGLE);
+      const nextAngle = clamp(
+        angle,
+        MIN_ANGLE,
+        MAX_ANGLE
+      );
+
+      // Avoid unnecessary trajectory recalculation.
+      if (Math.abs(g.angle - nextAngle) < 0.002) {
+        return;
+      }
+
+      g.angle = nextAngle;
+
+      // Calculate trajectory only when aim changes.
+      g.aimTrajectory = traceShot(
+        g.board,
+        LAUNCHER_X,
+        LAUNCHER_Y,
+        g.angle
+      );
 
       setSceneState((prev) => ({
         ...prev,
@@ -875,7 +882,7 @@ export default function GameCanvas({
   );
 
   // =====================================
-  // SHOOT
+  // SHOOT - SMOOTHER FLIGHT
   // =====================================
 
   const shoot = useCallback(() => {
@@ -918,8 +925,6 @@ export default function GameCanvas({
 
     const lastPoint = flightPath[flightPath.length - 1];
 
-    // Ensure path ends at the final snap cell.
-
     if (
       !lastPoint ||
       Math.hypot(
@@ -933,26 +938,31 @@ export default function GameCanvas({
       });
     }
 
-    // Calculate total flight distance.
-
+    // Precalculate segment distances once.
+    const segmentLengths = [];
     let totalDistance = 0;
 
     for (let i = 1; i < flightPath.length; i++) {
-      totalDistance += Math.hypot(
+      const distance = Math.hypot(
         flightPath[i].x - flightPath[i - 1].x,
         flightPath[i].y - flightPath[i - 1].y
       );
+
+      segmentLengths.push(distance);
+      totalDistance += distance;
     }
 
-    // Smooth duration according to distance.
-
+    // Balanced speed: smooth without feeling too slow.
     const flightDuration = clamp(
-      totalDistance * 0.8,
-      300,
-      700
+      totalDistance * 0.95,
+      400,
+      800
     );
 
     shotLockRef.current = true;
+
+    // Clear old trajectory while bubble is moving.
+    g.aimTrajectory = null;
 
     if (special) {
       g.boosters[special]--;
@@ -972,6 +982,8 @@ export default function GameCanvas({
       endX: target.x,
       endY: target.y,
       path: flightPath,
+      segmentLengths,
+      totalDistance,
       color,
       start: performance.now(),
       duration: flightDuration,
@@ -1036,30 +1048,37 @@ export default function GameCanvas({
       g.combo = 0;
     }
 
-    g.score += calculateShotScore(
+    const shotScore = calculateShotScore(
       result,
       Math.max(g.combo, 1)
     );
 
+    g.score += shotScore;
     g.floatingDropped += result.floating.length;
 
     setMessage(
       result.matched
-        ? `✨ +${calculateShotScore(
-            result,
-            Math.max(g.combo, 1)
-          )} POINTS!`
+        ? `✨ +${shotScore} POINTS!`
         : "Keep trying!"
     );
 
     sync();
 
-    // Resolve the animated shot after the actual flight.
-
+    // Resolve animated shot after actual flight.
     window.setTimeout(() => {
       if (gameRef.current === g) {
         g.flyingBubble = null;
         shotLockRef.current = false;
+
+        // Recalculate aim path for the updated board.
+        if (g.status === "READY" && !g.paused) {
+          g.aimTrajectory = traceShot(
+            g.board,
+            LAUNCHER_X,
+            LAUNCHER_Y,
+            g.angle
+          );
+        }
 
         sync();
         checkObjective();
@@ -1342,9 +1361,18 @@ export default function GameCanvas({
     if (g.paused) {
       stopMusic();
 
+      g.aimTrajectory = null;
+
       pointerDownRef.current = false;
       activePointerIdRef.current = null;
       pointerCancelledRef.current = false;
+    } else {
+      g.aimTrajectory = traceShot(
+        g.board,
+        LAUNCHER_X,
+        LAUNCHER_Y,
+        g.angle
+      );
     }
 
     draw();
@@ -1363,8 +1391,7 @@ export default function GameCanvas({
       "💡 Aim at bubbles matching your current colour!"
     );
   }, [hintCount]);
-
-  // =====================================
+    // =====================================
   // INITIALIZE
   // =====================================
 
@@ -1436,62 +1463,57 @@ export default function GameCanvas({
   }, [currentLevelId]);
 
   // =====================================
-  // ANIMATION LOOP
+  // OPTIMIZED ANIMATION LOOP
   // =====================================
 
+  useEffect(() => {
+    let lastFrameTime = 0;
 
-// OPTIMIZED ANIMATION LOOP
+    const isMobile = window.matchMedia(
+      "(max-width: 768px)"
+    ).matches;
 
-useEffect(() => {
-  let lastFrameTime = 0;
+    // Mobile: 30 FPS, Desktop: 60 FPS
+    const targetFPS = isMobile ? 30 : 60;
+    const frameInterval = 1000 / targetFPS;
 
-  const isMobile = window.matchMedia(
-    "(max-width: 768px)"
-  ).matches;
+    let running = true;
 
-  // Mobile: 30 FPS, Desktop: 60 FPS
-  const targetFPS = isMobile ? 30 : 60;
-  const frameInterval = 1000 / targetFPS;
+    const animate = (timestamp) => {
+      if (!running) return;
 
-  let running = true;
+      if (document.hidden) {
+        animationRef.current =
+          requestAnimationFrame(animate);
+        return;
+      }
 
-  const animate = (timestamp) => {
-    if (!running) return;
+      const elapsed = timestamp - lastFrameTime;
 
-    if (document.hidden) {
+      if (elapsed >= frameInterval) {
+        lastFrameTime =
+          timestamp - (elapsed % frameInterval);
+
+        if (gameRef.current) {
+          draw();
+        }
+      }
+
       animationRef.current =
         requestAnimationFrame(animate);
-      return;
-    }
-
-    const elapsed = timestamp - lastFrameTime;
-
-    if (elapsed >= frameInterval) {
-      lastFrameTime =
-        timestamp - (elapsed % frameInterval);
-
-      if (gameRef.current) {
-        draw();
-      }
-    }
+    };
 
     animationRef.current =
       requestAnimationFrame(animate);
-  };
 
-  animationRef.current =
-    requestAnimationFrame(animate);
+    return () => {
+      running = false;
 
-  return () => {
-    running = false;
-
-    if (animationRef.current) {
-      cancelAnimationFrame(animationRef.current);
-    }
-  };
-}, [draw]);
-
-
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [draw]);
 
   // =====================================
   // BEST SCORE
