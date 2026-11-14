@@ -1439,23 +1439,59 @@ export default function GameCanvas({
   // ANIMATION LOOP
   // =====================================
 
-  useEffect(() => {
-    const animate = () => {
+
+// OPTIMIZED ANIMATION LOOP
+
+useEffect(() => {
+  let lastFrameTime = 0;
+
+  const isMobile = window.matchMedia(
+    "(max-width: 768px)"
+  ).matches;
+
+  // Mobile: 30 FPS, Desktop: 60 FPS
+  const targetFPS = isMobile ? 30 : 60;
+  const frameInterval = 1000 / targetFPS;
+
+  let running = true;
+
+  const animate = (timestamp) => {
+    if (!running) return;
+
+    if (document.hidden) {
+      animationRef.current =
+        requestAnimationFrame(animate);
+      return;
+    }
+
+    const elapsed = timestamp - lastFrameTime;
+
+    if (elapsed >= frameInterval) {
+      lastFrameTime =
+        timestamp - (elapsed % frameInterval);
+
       if (gameRef.current) {
         draw();
       }
-
-      animationRef.current =
-        requestAnimationFrame(animate);
-    };
+    }
 
     animationRef.current =
       requestAnimationFrame(animate);
+  };
 
-    return () => {
+  animationRef.current =
+    requestAnimationFrame(animate);
+
+  return () => {
+    running = false;
+
+    if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
-    };
-  }, [draw]);
+    }
+  };
+}, [draw]);
+
+
 
   // =====================================
   // BEST SCORE
