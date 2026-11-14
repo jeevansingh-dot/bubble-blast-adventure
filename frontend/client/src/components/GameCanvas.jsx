@@ -2640,3 +2640,4 @@ export default function GameCanvas({
     </div>
   );
 }
+//end
