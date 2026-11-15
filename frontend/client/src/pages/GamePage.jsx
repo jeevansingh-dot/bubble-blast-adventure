@@ -199,10 +199,14 @@ console.log("================================");
         <div
           role="status"
           aria-live="polite"
-          style={{
-            width: "100%",
+                    style={{
+            position: "fixed",
+            top: "10px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 100000,
+            width: "calc(100% - 24px)",
             maxWidth: "440px",
-            marginBottom: "12px",
             background: "#2b2a05",
             border: "2px solid #ffd93d",
             borderRadius: "14px",

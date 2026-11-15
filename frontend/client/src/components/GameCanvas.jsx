@@ -1798,6 +1798,19 @@ export default function GameCanvas({
       }
     };
   }, [hud?.outcome, finishFinale]);
+    // Full screen game on phones: stop the page behind from scrolling
+  useEffect(() => {
+    if (!window.matchMedia("(max-width: 600px)").matches) {
+      return undefined;
+    }
+
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
   // =====================================
   // HUD DATA
   // =====================================
@@ -2398,56 +2411,98 @@ export default function GameCanvas({
           font-weight: 700;
         }
 
-        /* MOBILE RESPONSIVE */
+              /* MOBILE: FULL SCREEN GAME */
 
         @media (max-width: 600px) {
           .bs-game-shell {
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 50;
             width: 100% !important;
-            max-width: 100% !important;
+            max-width: none !important;
             min-width: 0 !important;
-            padding: 6px !important;
-            margin: 0 auto !important;
-            border-radius: 14px !important;
+            height: 100vh !important;
+            height: 100dvh !important;
+            margin: 0 !important;
+            padding:
+              calc(env(safe-area-inset-top, 0px) + 6px)
+              6px
+              calc(env(safe-area-inset-bottom, 0px) + 6px) !important;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
             box-sizing: border-box !important;
             overflow: hidden;
+            overscroll-behavior: none;
+            display: flex;
+            flex-direction: column;
+            background:
+              radial-gradient(circle at 50% 35%, ${worldGlow}44, transparent 60%),
+              ${worldBackground} !important;
           }
 
           .bs-topbar {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            flex: none;
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            justify-content: space-between;
             gap: 6px;
             width: 100%;
-            padding: 7px;
-            margin-bottom: 7px;
+            padding: 5px 6px;
+            margin-bottom: 6px;
             box-sizing: border-box;
           }
 
           .bs-topbar > * {
             min-width: 0;
-            text-align: center;
           }
 
           .bs-topbar strong {
-            font-size: 10px;
+            font-size: 11px;
             letter-spacing: 0;
+            white-space: nowrap;
+          }
+
+          .bs-topbar .bs-top-score {
+            display: none;
           }
 
           .bs-topbar .bs-btn {
-            min-height: 38px;
-            padding: 6px 3px;
-            font-size: 11px;
+            min-height: 34px;
+            padding: 5px 10px;
+            font-size: 12px;
             border-radius: 9px;
           }
 
+          .bs-progress {
+            flex: none;
+            gap: 8px;
+            margin-bottom: 4px;
+            padding: 0 4px;
+          }
+
+          .bs-progress-star {
+            font-size: 22px;
+          }
+
+          .bs-progress-score {
+            min-width: 64px;
+            padding: 4px 9px;
+            font-size: 15px;
+          }
+
           .bs-game-stage {
-            /* keep the real board shape (no stretching) and fit the screen height */
-            width: min(100%, max(260px, calc((100svh - 305px) * ${W} / ${H}))) !important;
+            /* real board shape, as big as the screen allows, centered */
+            flex: none;
+            width: min(100%, max(240px, calc((100vh - 200px) * ${W} / ${H}))) !important;
+            width: min(100%, max(240px, calc((100dvh - 200px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) * ${W} / ${H}))) !important;
             height: auto !important;
             min-height: 0;
             max-height: none;
-            margin: 0 auto;
+            margin: auto !important;
             aspect-ratio: ${W} / ${H} !important;
-            border-radius: 12px;
+            border-radius: 14px;
             overflow: hidden;
             touch-action: none;
             overscroll-behavior: contain;
@@ -2472,22 +2527,6 @@ export default function GameCanvas({
             display: none;
           }
 
-          .bs-progress {
-            gap: 8px;
-            margin-bottom: 7px;
-            padding: 0 3px;
-          }
-
-          .bs-progress-star {
-            font-size: 22px;
-          }
-
-          .bs-progress-score {
-            min-width: 64px;
-            padding: 5px 9px;
-            font-size: 15px;
-          }
-
           .bs-shots span {
             min-width: 38px;
             height: 28px;
@@ -2497,7 +2536,7 @@ export default function GameCanvas({
           .bs-touch-hint {
             display: block;
             position: absolute;
-            top: 26px;
+            top: 12px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 4;
@@ -2516,11 +2555,12 @@ export default function GameCanvas({
           }
 
           .bs-controls {
+            flex: none;
             width: 100%;
             grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 7px;
             padding: 7px;
-            margin-top: 7px;
+            margin-top: 0;
             box-sizing: border-box;
           }
 
@@ -2537,23 +2577,6 @@ export default function GameCanvas({
           }
 
           .bs-game-info {
-            width: 100%;
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            justify-content: center;
-            text-align: center;
-            gap: 8px;
-            padding: 9px 5px;
-            margin-top: 7px;
-            box-sizing: border-box;
-          }
-
-          .bs-game-info span {
-            font-size: 9px;
-            overflow-wrap: anywhere;
-          }
-
-          .bs-game-info .bs-keys {
             display: none;
           }
 
@@ -2584,19 +2607,15 @@ export default function GameCanvas({
         /* SMALL PHONES */
 
         @media (max-width: 380px) {
-          .bs-game-stage {
-            width: min(100%, max(260px, calc((100svh - 285px) * ${W} / ${H}))) !important;
-          }
-
           .bs-topbar {
             gap: 4px;
-            padding: 5px;
+            padding: 4px 5px;
           }
 
           .bs-topbar .bs-btn {
-            min-height: 35px;
-            font-size: 10px;
-            padding: 5px 2px;
+            min-height: 32px;
+            font-size: 11px;
+            padding: 4px 8px;
           }
 
           .bs-controls {
@@ -2607,11 +2626,8 @@ export default function GameCanvas({
           .bs-controls .bs-btn {
             min-height: 50px;
           }
-
-          .bs-game-info span {
-            font-size: 9px;
-          }
         }
+      
 
         @media (prefers-reduced-motion: reduce) {
           .bs-game-shell *,
@@ -2637,7 +2653,7 @@ export default function GameCanvas({
           LEVEL {actualLevel.id}
         </strong>
 
-        <strong>⭐ {hud?.score ?? 0}</strong>
+                <strong className="bs-top-score">⭐ {hud?.score ?? 0}</strong>
 
         <strong style={{ color: "#67e8f9" }}>
           🫧 {hud?.remaining ?? 0} Left

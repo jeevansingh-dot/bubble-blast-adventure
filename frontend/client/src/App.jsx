@@ -1,3 +1,4 @@
+
 import { Route, Routes, useLocation } from "react-router-dom";
 
 import BubbleBackground from "./components/BubbleBackground.jsx";
@@ -25,9 +26,11 @@ export default function App() {
   const location = useLocation();
 
   const isGameRoute = location.pathname.startsWith("/game/");
+
   const isMobile =
     typeof window !== "undefined" &&
     window.matchMedia("(max-width: 768px)").matches;
+
   return (
     <>
       {!isGameRoute && <BubbleBackground />}
@@ -47,7 +50,7 @@ export default function App() {
           flexDirection: "column",
         }}
       >
-        <Navbar />
+        {!(isGameRoute && isMobile) && <Navbar />}
 
         <main
           style={{
