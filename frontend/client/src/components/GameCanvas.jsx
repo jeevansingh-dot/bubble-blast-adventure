@@ -44,6 +44,10 @@ const R = BUBBLE_RADIUS;
 const LAUNCHER_X = W / 2;
 const LAUNCHER_Y = 540;
 
+
+// Bubble flight speed in pixels per millisecond (higher = faster)
+const BUBBLE_SPEED = 1.7;
+
 const MIN_ANGLE = (15 * Math.PI) / 180;
 const MAX_ANGLE = (165 * Math.PI) / 180;
 
@@ -264,6 +268,7 @@ export default function GameCanvas({
   const animationRef = useRef(null);
 
   const shotLockRef = useRef(false);
+    const aimRafRef = useRef(null);
   const pointerDownRef = useRef(false);
   const activePointerIdRef = useRef(null);
   const pointerCancelledRef = useRef(false);
@@ -519,7 +524,7 @@ export default function GameCanvas({
         1
       );
 
-      const eased = 1 - Math.pow(1 - progress, 3);
+            const eased = progress; // constant speed, like real bubble shooters
 
       const points =
         b.path && b.path.length > 1
@@ -688,7 +693,7 @@ export default function GameCanvas({
   // SYNC GAME STATE
   // =====================================
 
-  const sync = useCallback(() => {
+    const sync = useCallback((boardOverride) => {
     const g = gameRef.current;
     if (!g) return;
 
@@ -708,8 +713,8 @@ export default function GameCanvas({
 
     setBestScore((old) => Math.max(old, g.score));
 
-    setSceneState({
-      board: g.board.map((row) =>
+        setSceneState({
+      board: (Array.isArray(boardOverride) ? boardOverride : g.board).map((row) =>
         row.map((bubble) =>
           bubble ? { ...bubble } : null
         )
@@ -872,10 +877,15 @@ export default function GameCanvas({
         g.angle
       );
 
-      setSceneState((prev) => ({
-        ...prev,
-        angle: g.angle,
-      }));
+            // Update the 3D launcher at most once per frame (not on every pointer event)
+      if (!aimRafRef.current) {
+        aimRafRef.current = requestAnimationFrame(() => {
+          aimRafRef.current = null;
+          const live = gameRef.current;
+          if (!live) return;
+          setSceneState((prev) => ({ ...prev, angle: live.angle }));
+        });
+      }
 
       draw();
     },
@@ -953,11 +963,10 @@ export default function GameCanvas({
       totalDistance += distance;
     }
 
-    // Balanced speed: smooth without feeling too slow.
-    const flightDuration = clamp(
-      totalDistance * 0.95,
-      400,
-      800
+        const flightDuration = clamp(
+      totalDistance / BUBBLE_SPEED,
+      140,
+      650
     );
 
     shotLockRef.current = true;
@@ -1060,8 +1069,11 @@ export default function GameCanvas({
     setMessage(
       result.matched
         ? `✨ +${shotScore} POINTS!`
-        : "Keep trying!"
+               : "Keep trying!"
     );
+
+    // Keep the old board on screen until the bubble really lands
+    sync(previousBoard);
 
     sync();
 
@@ -1470,13 +1482,9 @@ export default function GameCanvas({
   useEffect(() => {
     let lastFrameTime = 0;
 
-    const isMobile = window.matchMedia(
-      "(max-width: 768px)"
-    ).matches;
-
-    // Mobile: 30 FPS, Desktop: 60 FPS
-    const targetFPS = isMobile ? 30 : 60;
-    const frameInterval = 1000 / targetFPS;
+        // No FPS cap: draw on every browser frame (60/90/120 Hz).
+    // A cap like 1000/60 skips frames because of timer jitter.
+    const frameInterval = 0;
 
     let running = true;
 

@@ -25,12 +25,14 @@ export default function App() {
   const location = useLocation();
 
   const isGameRoute = location.pathname.startsWith("/game/");
-
+  const isMobile =
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 768px)").matches;
   return (
     <>
       {!isGameRoute && <BubbleBackground />}
 
-      {isGameRoute && (
+      {isGameRoute && !isMobile && (
         <div className="game-3d-background">
           <GameScene3D />
         </div>

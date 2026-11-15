@@ -623,10 +623,9 @@ export default function GameBoard3D({
         overflow: "hidden",
       }}
     >
-      <Canvas
+           <Canvas
         orthographic
-        shadows
-        dpr={[1, 1.75]}
+        dpr={[1, 1.5]}
         camera={{
           position: [0, 0, 100],
           zoom: 1,
