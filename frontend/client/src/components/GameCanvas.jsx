@@ -68,7 +68,28 @@ const BEST_SCORE_KEY = "bubbleBlastAdventureBestScore";
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
+// =====================================
+// STAR SHAPE (used by the level clear finale)
+// =====================================
 
+function starPath(ctx, cx, cy, outer, inner, rotation = -Math.PI / 2) {
+  ctx.beginPath();
+
+  for (let i = 0; i < 10; i++) {
+    const radius = i % 2 === 0 ? outer : inner;
+    const angle = rotation + (i * Math.PI) / 5;
+    const x = cx + Math.cos(angle) * radius;
+    const y = cy + Math.sin(angle) * radius;
+
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+
+  ctx.closePath();
+}
+
+const FINALE_COLORS = ["red", "blue", "green", "yellow", "purple", "orange"];
+const FINALE_MS = 2300;
 // =====================================
 // PREMIUM GLASS BUBBLE
 // =====================================
@@ -503,9 +524,37 @@ export default function GameCanvas({
           Math.PI * 2
         );
 
-        ctx.strokeStyle = "rgba(255,255,255,.9)";
+              ctx.strokeStyle = "rgba(255,255,255,.9)";
         ctx.lineWidth = 1.5;
         ctx.stroke();
+
+        // Direction arrow next to the launcher
+        const dirX = points[1].x - points[0].x;
+        const dirY = points[1].y - points[0].y;
+        const dirLen = Math.hypot(dirX, dirY) || 1;
+        const ux = dirX / dirLen;
+        const uy = dirY / dirLen;
+        const tipDistance = 74 + Math.sin(now * 0.006) * 3;
+        const tipX = LAUNCHER_X + ux * tipDistance;
+        const tipY = LAUNCHER_Y + uy * tipDistance;
+
+        ctx.shadowBlur = 0;
+        ctx.lineCap = "round";
+        ctx.strokeStyle = "rgba(147,197,253,.95)";
+        ctx.fillStyle = "rgba(147,197,253,.95)";
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(LAUNCHER_X + ux * 34, LAUNCHER_Y + uy * 34);
+        ctx.lineTo(tipX, tipY);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(tipX + ux * 10, tipY + uy * 10);
+        ctx.lineTo(tipX - uy * 6.5, tipY + ux * 6.5);
+        ctx.lineTo(tipX + uy * 6.5, tipY - ux * 6.5);
+        ctx.closePath();
+        ctx.fill();
 
         ctx.restore();
       }
@@ -683,10 +732,107 @@ export default function GameCanvas({
     ctx.moveTo(0, H - 115);
     ctx.lineTo(W, H - 115);
 
-    ctx.strokeStyle = "rgba(248,113,113,.5)";
+     ctx.strokeStyle = "rgba(248,113,113,.5)";
     ctx.setLineDash([4, 5]);
     ctx.stroke();
     ctx.setLineDash([]);
+
+    // =====================================
+    // LEVEL CLEAR FINALE (animation only)
+    // =====================================
+
+    if (g.finale) {
+      const f = g.finale;
+      const t = now - f.start;
+
+      // Leftover shots fly up as bubbles
+      f.bubbles.forEach((b) => {
+        const local = (t - b.delay) / b.life;
+
+        if (local <= 0 || local >= 1) return;
+
+        const ease = 1 - Math.pow(1 - local, 2);
+        const x =
+          b.x0 +
+          (b.x1 - b.x0) * ease +
+          Math.sin(local * 7 + b.wobble) * 9;
+        const y = b.y0 + (b.y1 - b.y0) * ease;
+
+        ctx.globalAlpha = local > 0.75 ? 1 - (local - 0.75) / 0.25 : 1;
+        drawBubble(ctx, x, y, b.color, R * (1 + local * 0.3));
+        ctx.globalAlpha = 1;
+      });
+
+      // Big star (pops in with a small bounce)
+      const starT = clamp((t - 200) / 500, 0, 1);
+
+      if (starT > 0) {
+        const back =
+          1 + 2.2 * Math.pow(starT - 1, 3) + 1.2 * Math.pow(starT - 1, 2);
+        const size = 52 * back;
+        const cx = W / 2;
+        const cy = H * 0.34;
+
+        ctx.save();
+        ctx.shadowColor = "rgba(251,191,36,.9)";
+        ctx.shadowBlur = 28;
+
+        const gradient = ctx.createLinearGradient(cx, cy - size, cx, cy + size);
+        gradient.addColorStop(0, "#fde68a");
+        gradient.addColorStop(1, "#f59e0b");
+
+        starPath(
+          ctx,
+          cx,
+          cy,
+          size,
+          size * 0.48,
+          -Math.PI / 2 + Math.sin(t * 0.004) * 0.06
+        );
+        ctx.fillStyle = gradient;
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#fffbeb";
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.lineJoin = "round";
+        ctx.font = "900 28px Inter, system-ui, sans-serif";
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = "rgba(15,23,42,.85)";
+        ctx.fillStyle = "#fef3c7";
+        ctx.strokeText("LEVEL CLEAR!", cx, cy + size + 38);
+        ctx.fillText("LEVEL CLEAR!", cx, cy + size + 38);
+
+        if (f.count > 0) {
+          ctx.font = "800 15px Inter, system-ui, sans-serif";
+          ctx.lineWidth = 4;
+          ctx.fillStyle = "#bae6fd";
+          ctx.strokeText(`SHOTS LEFT  ×${f.count}`, cx, cy + size + 64);
+          ctx.fillText(`SHOTS LEFT  ×${f.count}`, cx, cy + size + 64);
+        }
+
+        ctx.restore();
+      }
+
+      // Blinking hint
+      if (t > 500) {
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.globalAlpha = 0.55 + Math.sin(now * 0.006) * 0.35;
+        ctx.font = "800 17px Inter, system-ui, sans-serif";
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(15,23,42,.8)";
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeText("Tap to skip", W / 2, H * 0.78);
+        ctx.fillText("Tap to skip", W / 2, H * 0.78);
+        ctx.restore();
+      }
+    }
   }, []);
 
   // =====================================
@@ -719,7 +865,8 @@ export default function GameCanvas({
           bubble ? { ...bubble } : null
         )
       ),
-      current: g.armed || g.current,
+            // hide the 3D launcher bubble while the shot is flying
+      current: g.flyingBubble ? null : g.armed || g.current,
       angle: g.angle,
       effects: g.effects.map((effect, index) => ({
         ...effect,
@@ -963,7 +1110,8 @@ export default function GameCanvas({
       totalDistance += distance;
     }
 
-        const flightDuration = clamp(
+    // Balanced speed: smooth without feeling too slow.
+    const flightDuration = clamp(
       totalDistance / BUBBLE_SPEED,
       140,
       650
@@ -1013,21 +1161,21 @@ export default function GameCanvas({
     g.swappedSinceShot = false;
     g.shots--;
 
-    const previousBoard = g.board.map((row) =>
-      row.map((bubble) =>
-        bubble ? { ...bubble } : null
-      )
+    // Work on a COPY of the board. The real g.board stays untouched
+    // until the bubble lands, so nothing can change on screen too early.
+    const workBoard = g.board.map((row) =>
+      row.map((bubble) => (bubble ? { ...bubble } : null))
     );
 
-    const result = resolveShot(g.board, r, c, color);
+    const result = resolveShot(workBoard, r, c, color);
 
     let removedCount = 0;
 
-    previousBoard.forEach((row, rowIndex) => {
+    g.board.forEach((row, rowIndex) => {
       row.forEach((bubble, colIndex) => {
         if (
           !bubble ||
-          g.board[rowIndex]?.[colIndex]
+          workBoard[rowIndex]?.[colIndex]
         ) {
           return;
         }
@@ -1069,19 +1217,16 @@ export default function GameCanvas({
     setMessage(
       result.matched
         ? `✨ +${shotScore} POINTS!`
-               : "Keep trying!"
+        : "Keep trying!"
     );
-
-    // Keep the old board on screen until the bubble really lands
-    sync(previousBoard);
 
     sync();
 
     // Resolve animated shot after actual flight.
     window.setTimeout(() => {
       if (gameRef.current === g) {
-           g.flyingBubble = null;
-        g.visualBoard = null; // bubble landed: now show the real board
+        g.board = workBoard; // the bubble landed: now the real board changes
+        g.flyingBubble = null;
         shotLockRef.current = false;
 
         // Recalculate aim path for the updated board.
@@ -1111,7 +1256,6 @@ export default function GameCanvas({
     playShootSound,
     playPopSound,
   ]);
-
   // =====================================
   // MOBILE + DESKTOP POINTER CONTROLS
   // =====================================
@@ -1592,15 +1736,82 @@ export default function GameCanvas({
     toggleBooster,
     togglePause,
   ]);
+  // =====================================
+  // LEVEL CLEAR FINALE
+  // The animation is only for show. It does NOT change the score:
+  // the server re-calculates the score from your shots.
+  // =====================================
 
+  const [resultReady, setResultReady] = useState(false);
+  const finaleTimerRef = useRef(null);
+
+  const finishFinale = useCallback(() => {
+    if (finaleTimerRef.current) {
+      clearTimeout(finaleTimerRef.current);
+      finaleTimerRef.current = null;
+    }
+
+    const g = gameRef.current;
+    if (g) g.finale = null;
+
+    setResultReady(true);
+  }, []);
+
+  useEffect(() => {
+    const outcome = hud?.outcome;
+    const g = gameRef.current;
+
+    if (!outcome) {
+      setResultReady(false);
+      return undefined;
+    }
+
+    if (outcome !== "WON" || !g) {
+      setResultReady(true);
+      return undefined;
+    }
+
+    const count = Math.min(g.shots, 14);
+
+    g.finale = {
+      start: performance.now(),
+      count: g.shots,
+      bubbles: Array.from({ length: count }, (_, i) => ({
+        color: FINALE_COLORS[i % FINALE_COLORS.length],
+        x0: LAUNCHER_X,
+        y0: LAUNCHER_Y,
+        x1: W * (0.14 + 0.72 * ((i * 0.618034) % 1)),
+        y1: 70 + (i % 4) * 38,
+        delay: 150 + i * 70,
+        life: 900,
+        wobble: i * 1.7,
+      })),
+    };
+
+    setResultReady(false);
+    finaleTimerRef.current = setTimeout(finishFinale, FINALE_MS);
+
+    return () => {
+      if (finaleTimerRef.current) {
+        clearTimeout(finaleTimerRef.current);
+        finaleTimerRef.current = null;
+      }
+    };
+  }, [hud?.outcome, finishFinale]);
   // =====================================
   // HUD DATA
   // =====================================
 
-  const stars = calculateStars(
+   const stars = calculateStars(
     hud?.score ?? 0,
     starThresholds
   );
+
+  // Star progress bar: the last star sits at about 89% of the bar
+  const scoreNow = hud?.score ?? 0;
+  const barMax = (starThresholds[starThresholds.length - 1] || 1) * 1.12;
+  const progressPct = Math.min(100, (scoreNow / barMax) * 100);
+  const shotsLeft = hud?.shots ?? actualLevel.shots;
 
   const boosters = [
     {
@@ -1622,8 +1833,7 @@ export default function GameCanvas({
   // =====================================
   // RENDER
   // =====================================
-
-    return (
+  return (
     <div
       className="bs-game-shell"
       style={{
@@ -1895,13 +2105,13 @@ export default function GameCanvas({
           pointer-events: none;
         }
 
-            .bs-next {
+        .bs-next {
           position: absolute;
           left: 18%;
           top: 0;
           transform: translate(-50%, -50%);
           display: flex;
-        }[]
+        }
 
         .bs-next small {
           position: absolute;
@@ -1975,6 +2185,161 @@ export default function GameCanvas({
           .bs-swap-btn { width: 40px; height: 40px; font-size: 18px; }
         }
 
+        /* STAR PROGRESS BAR */
+
+        .bs-progress {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 10px;
+          padding: 0 6px;
+        }
+
+        .bs-progress-track {
+          position: relative;
+          flex: 1;
+          height: 18px;
+        }
+
+        .bs-progress-bar {
+          position: absolute;
+          inset: 0;
+          overflow: hidden;
+          border-radius: 999px;
+          background: rgba(15,23,42,.88);
+          border: 2px solid rgba(125,211,252,.35);
+          box-shadow: inset 0 2px 5px rgba(0,0,0,.45);
+        }
+
+        .bs-progress-fill {
+          height: 100%;
+          border-radius: 999px;
+          background: linear-gradient(90deg,#0ea5e9,#38bdf8,#7dd3fc);
+          box-shadow: 0 0 14px rgba(56,189,248,.75);
+          transition: width .45s ease;
+        }
+
+        .bs-progress-star {
+          position: absolute;
+          top: 50%;
+          transform: translate(-50%, -50%);
+          font-size: 26px;
+          line-height: 1;
+          color: #475569;
+          text-shadow: 0 2px 4px rgba(0,0,0,.55);
+          transition: color .3s ease;
+        }
+
+        .bs-progress-star.on {
+          color: #fbbf24;
+          text-shadow: 0 0 12px rgba(251,191,36,.95), 0 2px 4px rgba(0,0,0,.5);
+          animation: bs-star-pop .55s ease;
+        }
+
+        @keyframes bs-star-pop {
+          0% { transform: translate(-50%, -50%) scale(.4); }
+          60% { transform: translate(-50%, -50%) scale(1.6); }
+          100% { transform: translate(-50%, -50%) scale(1); }
+        }
+
+        .bs-progress-score {
+          min-width: 78px;
+          padding: 6px 12px;
+          text-align: center;
+          border-radius: 999px;
+          background: rgba(15,23,42,.92);
+          border: 2px solid rgba(125,211,252,.35);
+          font-size: 17px;
+          font-weight: 900;
+          letter-spacing: .5px;
+          font-variant-numeric: tabular-nums;
+        }
+
+        /* SHOTS LEFT BADGE */
+
+        .bs-shots {
+          position: absolute;
+          left: 82%;
+          top: 0;
+          transform: translate(-50%, -50%);
+          display: flex;
+        }
+
+        .bs-shots small {
+          position: absolute;
+          bottom: 100%;
+          left: 50%;
+          transform: translateX(-50%);
+          margin-bottom: 4px;
+          white-space: nowrap;
+          color: #94a3b8;
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 1px;
+          text-shadow: 0 1px 3px rgba(0,0,0,.6);
+        }
+
+        .bs-shots span {
+          min-width: 44px;
+          height: 32px;
+          padding: 0 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          box-sizing: border-box;
+          border-radius: 999px;
+          border: 2px solid rgba(255,255,255,.4);
+          background: linear-gradient(180deg,#6d5df0,#3b2fa0);
+          box-shadow: 0 4px 12px rgba(0,0,0,.4);
+          font-size: 18px;
+          font-weight: 900;
+          font-variant-numeric: tabular-nums;
+        }
+
+        .bs-shots.low span {
+          background: linear-gradient(180deg,#f43f5e,#9f1239);
+          animation: bs-shots-pulse .8s ease-in-out infinite;
+        }
+
+        @keyframes bs-shots-pulse {
+          50% { transform: scale(1.12); }
+        }
+
+        /* BOOSTER COUNT BADGES */
+
+        .bs-booster {
+          position: relative;
+        }
+
+        .bs-count {
+          position: absolute;
+          top: -9px;
+          right: -7px;
+          min-width: 25px;
+          height: 25px;
+          padding: 0 5px;
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          border: 2px solid #fff;
+          background: radial-gradient(circle at 35% 30%,#e879f9,#7e22ce);
+          box-shadow: 0 3px 8px rgba(0,0,0,.45);
+          font-size: 13px;
+          font-weight: 900;
+        }
+
+        .bs-count.zero {
+          background: #475569;
+        }
+
+        .bs-key {
+          display: block;
+          font-size: 9px;
+          opacity: .75;
+        }
+
         /* BOOSTER PANEL */
 
         .bs-controls {
@@ -2033,7 +2398,7 @@ export default function GameCanvas({
           font-weight: 700;
         }
 
-              /* MOBILE RESPONSIVE */
+        /* MOBILE RESPONSIVE */
 
         @media (max-width: 600px) {
           .bs-game-shell {
@@ -2076,7 +2441,7 @@ export default function GameCanvas({
 
           .bs-game-stage {
             /* keep the real board shape (no stretching) and fit the screen height */
-            width: min(100%, max(260px, calc((100svh - 270px) * ${W} / ${H}))) !important;
+            width: min(100%, max(260px, calc((100svh - 305px) * ${W} / ${H}))) !important;
             height: auto !important;
             min-height: 0;
             max-height: none;
@@ -2101,6 +2466,32 @@ export default function GameCanvas({
 
           .bs-world-label {
             display: none;
+          }
+
+          .bs-key {
+            display: none;
+          }
+
+          .bs-progress {
+            gap: 8px;
+            margin-bottom: 7px;
+            padding: 0 3px;
+          }
+
+          .bs-progress-star {
+            font-size: 22px;
+          }
+
+          .bs-progress-score {
+            min-width: 64px;
+            padding: 5px 9px;
+            font-size: 15px;
+          }
+
+          .bs-shots span {
+            min-width: 38px;
+            height: 28px;
+            font-size: 16px;
           }
 
           .bs-touch-hint {
@@ -2194,38 +2585,7 @@ export default function GameCanvas({
 
         @media (max-width: 380px) {
           .bs-game-stage {
-            width: min(100%, max(260px, calc((100svh - 250px) * ${W} / ${H}))) !important;
-          }
-
-          .bs-topbar {
-            gap: 4px;
-            padding: 5px;
-          }
-
-          .bs-topbar .bs-btn {
-            min-height: 35px;
-            font-size: 10px;
-            padding: 5px 2px;
-          }
-
-          .bs-controls {
-            gap: 5px;
-            padding: 5px;
-          }
-
-          .bs-controls .bs-btn {
-            min-height: 50px;
-          }
-
-          .bs-game-info span {
-            font-size: 9px;
-          }
-        }
-        /* SMALL PHONES */
-
-        @media (max-width: 380px) {
-          .bs-game-stage {
-                       width: min(100%, max(260px, calc((100svh - 250px) * ${W} / ${H}))) !important;
+            width: min(100%, max(260px, calc((100svh - 285px) * ${W} / ${H}))) !important;
           }
 
           .bs-topbar {
@@ -2293,6 +2653,33 @@ export default function GameCanvas({
         >
           ⚙️
         </button>
+      </div>
+
+      {/* STAR PROGRESS BAR */}
+
+      <div className="bs-progress">
+        <div className="bs-progress-track">
+          <div className="bs-progress-bar">
+            <div
+              className="bs-progress-fill"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+
+          {starThresholds.map((threshold, index) => (
+            <span
+              key={index}
+              className={`bs-progress-star ${
+                scoreNow >= threshold ? "on" : ""
+              }`}
+              style={{ left: `${(threshold / barMax) * 100}%` }}
+            >
+              ★
+            </span>
+          ))}
+        </div>
+
+        <div className="bs-progress-score">{scoreNow}</div>
       </div>
 
       {/* GAME STAGE */}
@@ -2379,6 +2766,11 @@ export default function GameCanvas({
             />
           </div>
 
+          <div className={`bs-shots ${shotsLeft <= 3 ? "low" : ""}`}>
+            <small>SHOTS</small>
+            <span>{shotsLeft}</span>
+          </div>
+
           <button
             type="button"
             className="bs-swap-btn"
@@ -2442,7 +2834,7 @@ export default function GameCanvas({
 
         {/* GAME OVER / LEVEL COMPLETE */}
 
-        {hud?.outcome && (
+        {hud?.outcome && resultReady && (
           <div
             style={{
               position: "absolute",
@@ -2565,6 +2957,22 @@ export default function GameCanvas({
               ☰ Back to Levels
             </button>
           </div>
+        )}
+
+        {/* TAP TO SKIP THE LEVEL CLEAR ANIMATION */}
+
+        {hud?.outcome === "WON" && !resultReady && (
+          <div
+            onClick={finishFinale}
+            role="button"
+            aria-label="Skip animation"
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 9,
+              cursor: "pointer",
+            }}
+          />
         )}
 
         {/* SETTINGS MODAL */}
@@ -2692,7 +3100,7 @@ export default function GameCanvas({
           return (
             <button
               key={booster.id}
-              className="bs-btn"
+              className="bs-btn bs-booster"
               onClick={() => toggleBooster(booster.id)}
               disabled={!count}
               style={{
@@ -2701,29 +3109,35 @@ export default function GameCanvas({
                   : undefined,
               }}
             >
-              <span style={{ display: "block", fontSize: 20 }}>
+              <span style={{ display: "block", fontSize: 22 }}>
                 {booster.icon}
               </span>
 
               <span style={{ display: "block", fontSize: 10 }}>
-                {booster.label} ×{count}
+                {booster.label}
               </span>
 
-              <span style={{ display: "block", fontSize: 9 }}>
-                Key {booster.key}
+              <span className="bs-key">Key {booster.key}</span>
+
+              <span className={`bs-count ${count ? "" : "zero"}`}>
+                {count}
               </span>
             </button>
           );
         })}
 
         <button
-          className="bs-btn"
+          className="bs-btn bs-booster"
           onClick={hint}
           disabled={hintCount <= 0}
         >
-          <span style={{ fontSize: 20 }}>💡</span>
-          <span style={{ fontSize: 10 }}>Hint ×{hintCount}</span>
-          <span style={{ fontSize: 9 }}>Key H</span>
+          <span style={{ fontSize: 22 }}>💡</span>
+          <span style={{ fontSize: 10 }}>Hint</span>
+          <span className="bs-key">Key H</span>
+
+          <span className={`bs-count ${hintCount > 0 ? "" : "zero"}`}>
+            {hintCount}
+          </span>
         </button>
       </div>
 
