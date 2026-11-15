@@ -693,7 +693,7 @@ export default function GameCanvas({
   // SYNC GAME STATE
   // =====================================
 
-    const sync = useCallback((boardOverride) => {
+      const sync = useCallback(() => {
     const g = gameRef.current;
     if (!g) return;
 
@@ -714,7 +714,7 @@ export default function GameCanvas({
     setBestScore((old) => Math.max(old, g.score));
 
         setSceneState({
-      board: (Array.isArray(boardOverride) ? boardOverride : g.board).map((row) =>
+            board: g.board.map((row) =>
         row.map((bubble) =>
           bubble ? { ...bubble } : null
         )
@@ -1080,7 +1080,8 @@ export default function GameCanvas({
     // Resolve animated shot after actual flight.
     window.setTimeout(() => {
       if (gameRef.current === g) {
-        g.flyingBubble = null;
+           g.flyingBubble = null;
+        g.visualBoard = null; // bubble landed: now show the real board
         shotLockRef.current = false;
 
         // Recalculate aim path for the updated board.
