@@ -1,4 +1,3 @@
-
 import { Route, Routes, useLocation } from "react-router-dom";
 
 import BubbleBackground from "./components/BubbleBackground.jsx";
@@ -54,7 +53,7 @@ export default function App() {
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
-            padding: "24px 12px",
+            padding: isGameRoute ? "8px 4px" : "24px 12px",
           }}
         >
           <Routes>

@@ -1,4 +1,5 @@
 import "./GameCanvas.css";
+import { useAuth } from "../context/AuthContext.jsx";
 import React, {
   useCallback,
   useEffect,
@@ -1633,7 +1634,7 @@ export default function GameCanvas({
   // RENDER
   // =====================================
 
-  return (
+    return (
     <div
       className="bs-game-shell"
       style={{
@@ -1893,11 +1894,103 @@ export default function GameCanvas({
           to { width: 100px; }
         }
 
+        /* LAUNCHER ROW: NEXT bubble - SWAP button - (current bubble on canvas) */
+
+        .bs-launcher-row {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: ${(LAUNCHER_Y / H) * 100}%;
+          height: 0;
+          z-index: 4;
+          pointer-events: none;
+        }
+
+            .bs-next {
+          position: absolute;
+          left: 18%;
+          top: 0;
+          transform: translate(-50%, -50%);
+          display: flex;
+        }[]
+
+        .bs-next small {
+          position: absolute;
+          bottom: 100%;
+          left: 50%;
+          transform: translateX(-50%);
+          margin-bottom: 4px;
+          white-space: nowrap;
+          color: #94a3b8;
+          font-size: 9px;
+          font-weight: 800;
+          letter-spacing: 1px;
+          text-shadow: 0 1px 3px rgba(0,0,0,.6);
+        }
+
+        .bs-next-ball {
+          width: 34px;
+          height: 34px;
+          border-radius: 50%;
+          border: 2px solid rgba(255,255,255,.55);
+          box-shadow: 0 0 12px rgba(0,0,0,.45), inset 0 -4px 8px rgba(0,0,0,.25), inset 0 3px 6px rgba(255,255,255,.35);
+          transition: background .2s ease;
+        }
+
+        .bs-swap-btn {
+          position: absolute;
+          left: 34%;
+          top: 0;
+          transform: translate(-50%, -50%);
+          width: 42px;
+          height: 42px;
+          padding: 0;
+          border-radius: 50%;
+          pointer-events: auto;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 20px;
+          line-height: 1;
+          color: #fff;
+          border: 2px solid rgba(125,211,252,.55);
+          background: linear-gradient(145deg,#2563eb,#6d28d9);
+          box-shadow: 0 0 16px rgba(59,130,246,.45), 0 6px 14px rgba(0,0,0,.35);
+          cursor: pointer;
+          touch-action: manipulation;
+          -webkit-tap-highlight-color: transparent;
+          transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
+        }
+
+        .bs-swap-btn:hover:not(:disabled) {
+          transform: translate(-50%, -50%) rotate(180deg) scale(1.06);
+        }
+
+        .bs-swap-btn:active:not(:disabled) {
+          transform: translate(-50%, -50%) rotate(180deg) scale(.92);
+        }
+
+        .bs-swap-btn:disabled {
+          opacity: .4;
+          cursor: not-allowed;
+          box-shadow: none;
+        }
+
+        .bs-swap-btn:focus-visible {
+          outline: 2px solid #7dd3fc;
+          outline-offset: 3px;
+        }
+
+        @media (max-width: 600px) {
+          .bs-next-ball { width: 28px; height: 28px; }
+          .bs-swap-btn { width: 40px; height: 40px; font-size: 18px; }
+        }
+
         /* BOOSTER PANEL */
 
         .bs-controls {
           display: grid;
-          grid-template-columns: repeat(4,minmax(0,1fr));
+          grid-template-columns: repeat(3,minmax(0,1fr));
           gap: 10px;
           padding: 12px;
           margin-top: 10px;
@@ -1951,7 +2044,7 @@ export default function GameCanvas({
           font-weight: 700;
         }
 
-        /* MOBILE RESPONSIVE */
+              /* MOBILE RESPONSIVE */
 
         @media (max-width: 600px) {
           .bs-game-shell {
@@ -1993,11 +2086,13 @@ export default function GameCanvas({
           }
 
           .bs-game-stage {
-            width: 100% !important;
-            height: min(72svh, 540px) !important;
-            min-height: 340px;
-            max-height: 540px;
-            aspect-ratio: auto !important;
+            /* keep the real board shape (no stretching) and fit the screen height */
+            width: min(100%, max(260px, calc((100svh - 270px) * ${W} / ${H}))) !important;
+            height: auto !important;
+            min-height: 0;
+            max-height: none;
+            margin: 0 auto;
+            aspect-ratio: ${W} / ${H} !important;
             border-radius: 12px;
             overflow: hidden;
             touch-action: none;
@@ -2016,19 +2111,17 @@ export default function GameCanvas({
           }
 
           .bs-world-label {
-            top: 8px;
-            font-size: 8px;
-            letter-spacing: 2px;
+            display: none;
           }
 
           .bs-touch-hint {
             display: block;
             position: absolute;
-            bottom: 8px;
+            top: 26px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 4;
-            max-width: calc(100% - 100px);
+            max-width: calc(100% - 24px);
             white-space: nowrap;
             text-align: center;
             pointer-events: none;
@@ -2044,7 +2137,7 @@ export default function GameCanvas({
 
           .bs-controls {
             width: 100%;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 7px;
             padding: 7px;
             margin-top: 7px;
@@ -2066,7 +2159,7 @@ export default function GameCanvas({
           .bs-game-info {
             width: 100%;
             display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             justify-content: center;
             text-align: center;
             gap: 8px;
@@ -2078,6 +2171,10 @@ export default function GameCanvas({
           .bs-game-info span {
             font-size: 9px;
             overflow-wrap: anywhere;
+          }
+
+          .bs-game-info .bs-keys {
+            display: none;
           }
 
           .bs-transition-title {
@@ -2108,8 +2205,38 @@ export default function GameCanvas({
 
         @media (max-width: 380px) {
           .bs-game-stage {
-            height: min(68svh, 470px) !important;
-            min-height: 320px;
+            width: min(100%, max(260px, calc((100svh - 250px) * ${W} / ${H}))) !important;
+          }
+
+          .bs-topbar {
+            gap: 4px;
+            padding: 5px;
+          }
+
+          .bs-topbar .bs-btn {
+            min-height: 35px;
+            font-size: 10px;
+            padding: 5px 2px;
+          }
+
+          .bs-controls {
+            gap: 5px;
+            padding: 5px;
+          }
+
+          .bs-controls .bs-btn {
+            min-height: 50px;
+          }
+
+          .bs-game-info span {
+            font-size: 9px;
+          }
+        }
+        /* SMALL PHONES */
+
+        @media (max-width: 380px) {
+          .bs-game-stage {
+                       width: min(100%, max(260px, calc((100svh - 250px) * ${W} / ${H}))) !important;
           }
 
           .bs-topbar {
@@ -2249,42 +2376,30 @@ export default function GameCanvas({
           }}
         />
 
-        {/* NEXT BUBBLE */}
+        {/* LAUNCHER ROW: NEXT bubble, SWAP button, then the current bubble on the canvas */}
 
-        <div
-          style={{
-            position: "absolute",
-            bottom: 12,
-            left: 12,
-            zIndex: 4,
-            padding: "6px 9px",
-            background: "#0f172add",
-            border: "1px solid #38bdf866",
-            borderRadius: 10,
-            textAlign: "center",
-            pointerEvents: "none",
-          }}
-        >
-          <small
-            style={{
-              display: "block",
-              color: "#94a3b8",
-              fontSize: 9,
-            }}
+        <div className="bs-launcher-row">
+          <div className="bs-next">
+            <small>NEXT</small>
+            <span
+              className="bs-next-ball"
+              style={{
+                background:
+                  COLOR_MAP[hud?.next || g?.next] || "#fff",
+              }}
+            />
+          </div>
+
+          <button
+            type="button"
+            className="bs-swap-btn"
+            onClick={swap}
+            disabled={Boolean(hud?.armed) || paused || Boolean(hud?.outcome)}
+            aria-label="Swap current and next bubble"
+            title="Swap (S)"
           >
-            NEXT
-          </small>
-
-          <span
-            style={{
-              display: "inline-block",
-              width: 22,
-              height: 22,
-              borderRadius: "50%",
-              background:
-                COLOR_MAP[hud?.next || g?.next] || "#fff",
-            }}
-          />
+            🔄
+          </button>
         </div>
 
         {/* MESSAGE */}
@@ -2612,12 +2727,6 @@ export default function GameCanvas({
           );
         })}
 
-        <button className="bs-btn" onClick={swap}>
-          <span style={{ fontSize: 20 }}>🔄</span>
-          <span style={{ fontSize: 10 }}>Swap</span>
-          <span style={{ fontSize: 9 }}>Key S</span>
-        </button>
-
         <button
           className="bs-btn"
           onClick={hint}
@@ -2635,9 +2744,8 @@ export default function GameCanvas({
         <span>🫧 Remaining: {hud?.remaining ?? 0}</span>
         <span>Shots: {hud?.shots ?? actualLevel.shots}</span>
         <span>Best: {bestScore}</span>
-        <span>Space: Shoot • S: Swap • Esc: Pause</span>
+        <span className="bs-keys">Space: Shoot • S: Swap • Esc: Pause</span>
       </div>
     </div>
   );
 }
-//end
