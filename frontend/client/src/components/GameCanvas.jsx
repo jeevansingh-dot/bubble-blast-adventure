@@ -1479,41 +1479,21 @@ export default function GameCanvas({
   // OPTIMIZED ANIMATION LOOP
   // =====================================
 
-  useEffect(() => {
-    let lastFrameTime = 0;
-
-        // No FPS cap: draw on every browser frame (60/90/120 Hz).
-    // A cap like 1000/60 skips frames because of timer jitter.
-    const frameInterval = 0;
-
+   useEffect(() => {
     let running = true;
 
-    const animate = (timestamp) => {
+    const animate = () => {
       if (!running) return;
 
-      if (document.hidden) {
-        animationRef.current =
-          requestAnimationFrame(animate);
-        return;
+      // Skip drawing only while the tab is hidden
+      if (!document.hidden && gameRef.current) {
+        draw();
       }
 
-      const elapsed = timestamp - lastFrameTime;
-
-      if (elapsed >= frameInterval) {
-        lastFrameTime =
-          timestamp - (elapsed % frameInterval);
-
-        if (gameRef.current) {
-          draw();
-        }
-      }
-
-      animationRef.current =
-        requestAnimationFrame(animate);
+      animationRef.current = requestAnimationFrame(animate);
     };
 
-    animationRef.current =
-      requestAnimationFrame(animate);
+    animationRef.current = requestAnimationFrame(animate);
 
     return () => {
       running = false;
